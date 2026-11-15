@@ -42,7 +42,7 @@ interface AuthContextType {
     emergencyContactPhone: string;
     emergencyContactRelation: string;
   }) => Promise<{ success: boolean; error?: string }>;
-  inviteMember: (email: string, role: ProfileMemberRole, permissions?: string[]) => Promise<{ invitation: ProfileInvitation | null; error?: string }>;
+  inviteMember: (email: string, role: ProfileMemberRole) => Promise<{ invitation: ProfileInvitation | null; error?: string }>;
   verifyInvitation: (inviteCode: string, email: string) => Promise<{ role?: ProfileMemberRole; error?: string }>;
   acceptInvitation: (inviteCode: string) => Promise<{ success: boolean; error?: string }>;
   revokeMember: (memberId: string) => Promise<{ success: boolean; error?: string }>;
@@ -89,7 +89,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setUser(sessionUser);
           await loadHealthcareData(sessionUser);
         }
-      } catch (err: any) {
+      } catch (err: unknown) {
         console.error('Session load error:', err);
       } finally {
         setIsLoading(false);
@@ -152,17 +152,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           dbService.getNotifications(ep.id, currentUser.id),
         ]);
 
-        if (medsRes.data) {
-          setMedications(medsRes.data);
+        const requestErrors = [medsRes.error, aptsRes.error, notifsRes.error].filter(
+          (requestError): requestError is string => Boolean(requestError),
+        );
+        if (requestErrors.length > 0) {
+          throw new Error(requestErrors.join(' '));
         }
 
-        if (aptsRes.data) {
-          setAppointments(aptsRes.data);
-        }
-
-        if (notifsRes.data) {
-          setNotifications(notifsRes.data);
-        }
+        setMedications(medsRes.data);
+        setAppointments(aptsRes.data);
+        setNotifications(notifsRes.data);
       } else {
         setMembers([]);
         setPendingInvitations([]);
@@ -170,7 +169,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setAppointments([]);
         setNotifications([]);
       }
-    } catch (err) {
+    } catch (err: unknown) {
       console.error('Error loading healthcare profile details from database:', err);
       setError('Unable to load secure care profile data. Please refresh and try again.');
     }
@@ -310,7 +309,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return { success: true };
   };
 
-  const inviteMember = async (email: string, role: ProfileMemberRole, permissions?: string[]) => {
+  const inviteMember = async (email: string, role: ProfileMemberRole) => {
     if (!user || !elderlyProfile) {
       return { invitation: null, error: 'No active profile found' };
     }
@@ -325,14 +324,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       invitedBy: user.id,
       invitedEmail: email,
       role,
-      permissions,
     });
 
-    if (result.invitation) {
-      setPendingInvitations(prev => [result.invitation, ...prev]);
+    const invitation = result.invitation;
+    if (result.error || !invitation) {
+      return { invitation: null, error: result.error || 'Invitation was not created.' };
     }
 
-    return result;
+    setPendingInvitations(prev => [invitation, ...prev]);
+    return { invitation };
   };
 
   const acceptInvitation = async (inviteCode: string) => {
@@ -440,7 +440,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const markNotificationAsRead = async (id: string) => {
-    await dbService.markNotificationAsRead(id);
+    const result = await dbService.markNotificationAsRead(id);
+    if (!result.success) {
+      setError(result.error || 'Unable to update notification.');
+      return;
+    }
     setNotifications(prev => prev.map(n => n.id === id ? { ...n, is_read: true } : n));
   };
 

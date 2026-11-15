@@ -62,7 +62,9 @@ function setStoredItems<T>(key: string, items: T[]): void {
  * Verify authorization for the given profile and user
  */
 function verifyProfileAuthorization(elderlyProfileId: string, currentUserId?: string): boolean {
-  if (!currentUserId) return true; // Internal service or authenticated supabase session
+  // Live Supabase requests rely on RLS; local storage is not an authorization source.
+  if (isSupabaseConfigured && supabase) return true;
+  if (!currentUserId) return false;
 
   const elderlyProfiles: ElderlyProfile[] = getStoredItems(STORAGE_ELDERLY_PROFILES_KEY);
   const profile = elderlyProfiles.find(p => p.id === elderlyProfileId);
@@ -80,7 +82,9 @@ function verifyProfileAuthorization(elderlyProfileId: string, currentUserId?: st
  * Verify caregiver or owner management privileges
  */
 function verifyManagementAuthorization(elderlyProfileId: string, currentUserId?: string): boolean {
-  if (!currentUserId) return true;
+  // Live Supabase writes rely on RLS; local storage is not an authorization source.
+  if (isSupabaseConfigured && supabase) return true;
+  if (!currentUserId) return false;
 
   const elderlyProfiles: ElderlyProfile[] = getStoredItems(STORAGE_ELDERLY_PROFILES_KEY);
   const profile = elderlyProfiles.find(p => p.id === elderlyProfileId);

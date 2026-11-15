@@ -141,6 +141,14 @@ export interface DbMedicationLog {
   created_at: string;
 }
 
+export type JsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | JsonValue[]
+  | { [key: string]: JsonValue };
+
 /**
  * PostgreSQL Database entity: appointments
  */
@@ -178,7 +186,7 @@ export interface DbNotification {
   is_read: boolean;
   read_at?: string;
   link_url?: string;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, JsonValue>;
   created_at: string;
 }
 
@@ -203,7 +211,7 @@ export interface DbActivityLog {
     | 'profile_updated'
     | 'emergency_contact_updated';
   description: string;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, JsonValue>;
   created_at: string;
   // Joined relation: actor details
   actor_name?: string;
@@ -259,7 +267,7 @@ export interface CreateNotificationInput {
   message: string;
   type: DbNotification['type'];
   linkUrl?: string;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, JsonValue>;
 }
 
 export interface CreateActivityLogInput {
@@ -267,7 +275,7 @@ export interface CreateActivityLogInput {
   actorUserId?: string;
   actionType: DbActivityLog['action_type'];
   description: string;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, JsonValue>;
 }
 
 // ==============================================================================

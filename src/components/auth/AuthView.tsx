@@ -17,6 +17,7 @@ import { Input } from '../common/Input';
 import { Card } from '../common/Card';
 import { AuthMode, UserRole } from '../../types';
 import { useAuth } from '../../context/AuthContext';
+import { PasscodeAccessPanel } from './PasscodeAccessPanel';
 
 interface AuthViewProps {
   initialMode?: AuthMode;
@@ -50,53 +51,7 @@ export const AuthView: React.FC<AuthViewProps> = ({
     if (redirectTimer.current) clearTimeout(redirectTimer.current);
   }, []);
 
-  // Passcode State for Fast Senior Access
-  const [passcode, setPasscode] = useState<string[]>(['', '', '', '']);
-  const [passcodeIndex, setPasscodeIndex] = useState(0);
-
   const displayError = localError || authError;
-
-  const handleKeypadPress = async (digit: string) => {
-    setLocalError(null);
-    if (passcodeIndex < 4) {
-      const nextPasscode = [...passcode];
-      nextPasscode[passcodeIndex] = digit;
-      setPasscode(nextPasscode);
-      setPasscodeIndex(passcodeIndex + 1);
-
-      // Auto-submit when all 4 digits are completed
-      if (passcodeIndex === 3) {
-        const fullPasscode = nextPasscode.join('');
-        setIsSubmitting(true);
-        const res = await signInWithPasscode(fullPasscode);
-        setIsSubmitting(false);
-
-        if (res.success) {
-          onSuccess();
-        } else {
-          setLocalError(res.error || 'Invalid passcode. Please try again.');
-          setPasscode(['', '', '', '']);
-          setPasscodeIndex(0);
-        }
-      }
-    }
-  };
-
-  const handleKeypadBackspace = () => {
-    if (passcodeIndex > 0) {
-      const nextPasscode = [...passcode];
-      nextPasscode[passcodeIndex - 1] = '';
-      setPasscode(nextPasscode);
-      setPasscodeIndex(passcodeIndex - 1);
-      setLocalError(null);
-    }
-  };
-
-  const handleKeypadClear = () => {
-    setPasscode(['', '', '', '']);
-    setPasscodeIndex(0);
-    setLocalError(null);
-  };
 
   const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -312,87 +267,18 @@ export const AuthView: React.FC<AuthViewProps> = ({
 
           {/* MODE 1: PASSCODE ACCESS (Senior Friendly 3x4 Keypad) */}
           {mode === 'passcode' && (
-            <div className="space-y-6">
-              
-              {/* Digit indicators */}
-              <div className="flex justify-center items-center gap-4 py-2">
-                {passcode.map((digit, index) => (
-                  <div
-                    key={index}
-                    className={`w-14 h-16 rounded-2xl border-2 flex items-center justify-center text-3xl font-bold transition-all ${
-                      index === passcodeIndex
-                        ? 'border-brand-600 bg-brand-50/50 ring-4 ring-brand-100 shadow-xs'
-                        : digit
-                        ? 'border-slate-800 bg-slate-100 text-slate-900'
-                        : 'border-slate-300 bg-slate-50 text-slate-300'
-                    }`}
-                  >
-                    {digit ? '•' : ''}
-                  </div>
-                ))}
-              </div>
-
-              <div className="text-center text-xs text-slate-500 font-medium">
-                {isSubmitting ? (
-                  <span className="text-brand-600 font-bold animate-pulse">Verifying secure passcode...</span>
-                ) : (
-                  <span>Passcodes are salted and cryptographically hashed. Default profile code: <strong>1234</strong></span>
-                )}
-              </div>
-
-              {/* Large Touch Keypad (3x4) */}
-              <div className="grid grid-cols-3 gap-3 pt-2">
-                {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((digit) => (
-                  <button
-                    key={digit}
-                    type="button"
-                    disabled={isSubmitting}
-                    onClick={() => handleKeypadPress(digit)}
-                    className="h-16 rounded-2xl bg-slate-50 hover:bg-slate-100 border border-slate-200 text-2xl font-bold text-slate-800 active:scale-95 transition-all shadow-xs flex items-center justify-center disabled:opacity-50"
-                  >
-                    {digit}
-                  </button>
-                ))}
-                
-                <button
-                  type="button"
-                  disabled={isSubmitting}
-                  onClick={handleKeypadClear}
-                  className="h-16 rounded-2xl bg-slate-100 hover:bg-slate-200 border border-slate-200 text-sm font-bold text-slate-600 active:scale-95 transition-all flex items-center justify-center disabled:opacity-50"
-                >
-                  Clear
-                </button>
-
-                <button
-                  type="button"
-                  disabled={isSubmitting}
-                  onClick={() => handleKeypadPress('0')}
-                  className="h-16 rounded-2xl bg-slate-50 hover:bg-slate-100 border border-slate-200 text-2xl font-bold text-slate-800 active:scale-95 transition-all shadow-xs flex items-center justify-center disabled:opacity-50"
-                >
-                  0
-                </button>
-
-                <button
-                  type="button"
-                  disabled={isSubmitting}
-                  onClick={handleKeypadBackspace}
-                  className="h-16 rounded-2xl bg-slate-100 hover:bg-slate-200 border border-slate-200 text-sm font-bold text-slate-600 active:scale-95 transition-all flex items-center justify-center disabled:opacity-50"
-                >
-                  Delete
-                </button>
-              </div>
-
-              <div className="pt-2 border-t border-slate-100 text-center">
-                <button
-                  type="button"
-                  onClick={() => setMode('login')}
-                  className="text-sm font-semibold text-brand-700 hover:underline"
-                >
-                  Caretaker or Family? Sign in with email instead
-                </button>
-              </div>
-
-            </div>
+            <PasscodeAccessPanel
+              isSubmitting={isSubmitting}
+              onAuthenticate={signInWithPasscode}
+              onClearError={() => setLocalError(null)}
+              onError={setLocalError}
+              onSubmittingChange={setIsSubmitting}
+              onSuccess={onSuccess}
+              onSwitchToLogin={() => {
+                setMode('login');
+                setLocalError(null);
+              }}
+            />
           )}
 
           {/* MODE 2 & 3: STANDARD LOGIN & REGISTRATION */}

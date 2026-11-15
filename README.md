@@ -65,41 +65,19 @@ VITE_SUPABASE_URL=https://your-project-id.supabase.co
 VITE_SUPABASE_ANON_KEY=your-actual-anon-public-key-here
 ```
 
-*Note: If environment variables are not yet configured or are using placeholders, the platform seamlessly defaults to a resilient, local storage-persisted provider that models the exact same database tables, cryptographic salting/hashing, and role permission checks.*
+*Note: Without valid Supabase credentials, the application uses limited browser-local storage for development. It is not equivalent to Supabase authentication or RLS, Care Circle invitation operations require Supabase, and local mode must not be used with real patient data.*
 
 ---
 
-## 🧪 Automated Test Suite
+## 🧪 Development Verification Scripts
 
-Run the automated Phase 2 test suite:
+The repository does not currently define an `npm test` script. The workflow scripts under `src/tests` are legacy development checks and are not a substitute for testing against a dedicated Supabase project.
 
 ```bash
-npx tsx src/tests/runPhase2Tests.ts
+npx tsx src/tests/testElderlyProfileWorkflow.ts
 ```
 
-### Verified Test Cases (22/22 Passing):
-1. ✓ Passcode is cryptographically hashed and not stored in plain text
-2. ✓ SHA-256 produces valid 64-character hex digest
-3. ✓ Verification succeeds with correct passcode and salt
-4. ✓ Verification fails with wrong passcode
-5. ✓ Invitation code format starts with CARE- prefix
-6. ✓ Generated invitation codes are unique
-7. ✓ Elderly Profile Owner registered successfully
-8. ✓ Caretaker registered successfully
-9. ✓ Family Member registered successfully
-10. ✓ Duplicate email registration is rejected with error
-11. ✓ Login succeeds with valid credentials
-12. ✓ Active session persists in storage
-13. ✓ Login with invalid password is rejected
-14. ✓ Elderly healthcare profile created successfully
-15. ✓ Healthcare profile passcode is hashed
-16. ✓ Owner successfully issued secure invitation code
-17. ✓ Caretaker successfully redeemed invitation code
-18. ✓ Caretaker appears in active profile members list
-19. ✓ Non-owner is rejected when attempting to revoke member access
-20. ✓ Profile Owner successfully revokes member access
-21. ✓ Member status updated to revoked
-22. ✓ Sign out completely clears session
+This script uses in-memory browser-storage substitutes and does not verify Supabase, database policies, or RLS. The Phase 2 and Phase 3 scripts are legacy checks and currently assume local invitation behavior; Care Circle invitations now require the Supabase-backed RPCs. Do not interpret those scripts as successful integration or authorization tests.
 
 ---
 

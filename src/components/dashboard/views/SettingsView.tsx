@@ -90,7 +90,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               <button
                 key={sizeOpt.id}
                 type="button"
-                onClick={() => onUpdateAccessibility({ fontSize: sizeOpt.id as any })}
+                onClick={() => onUpdateAccessibility({ fontSize: sizeOpt.id as AccessibilitySettings['fontSize'] })}
                 className={`p-4 rounded-2xl border-2 text-left transition-all ${
                   accessibility.fontSize === sizeOpt.id
                     ? 'border-brand-600 bg-brand-50/50 ring-2 ring-brand-100'

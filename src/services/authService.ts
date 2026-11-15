@@ -14,6 +14,32 @@ const STORAGE_SESSION_KEY = 'carebridge_auth_session';
 const STORAGE_PROFILES_KEY = 'carebridge_db_profiles';
 const STORAGE_ELDERLY_PROFILES_KEY = 'carebridge_db_elderly_profiles';
 
+interface StoredUserProfile extends UserProfile {
+  password: string;
+}
+
+interface UserAuthResult {
+  user: UserProfile | null;
+  error?: string;
+  needsEmailConfirmation?: boolean;
+}
+
+interface PasscodeAuthResult {
+  user: UserProfile | null;
+  elderlyProfile: ElderlyProfile | null;
+  error?: string;
+}
+
+interface ProfileResult {
+  profile: ElderlyProfile | null;
+  error?: string;
+}
+
+interface InvitationResult {
+  invitation: ProfileInvitation | null;
+  error?: string;
+}
+
 // ==============================================================================
 // AUTHENTICATION & ROLE MANAGEMENT API
 // ==============================================================================
@@ -29,7 +55,7 @@ export const authService = {
     fullName: string;
     role: UserRole;
     phone?: string;
-  }): Promise<{ user: UserProfile; error?: string; needsEmailConfirmation?: boolean }> {
+  }): Promise<UserAuthResult> {
     const { email, password, fullName, role, phone } = params;
 
     if (isSupabaseConfigured && supabase) {
@@ -46,11 +72,11 @@ export const authService = {
       });
 
       if (error) {
-        return { user: null as any, error: error.message };
+        return { user: null, error: error.message };
       }
 
       if (data.user && !data.session) {
-        return { user: null as any, needsEmailConfirmation: true };
+        return { user: null, needsEmailConfirmation: true };
       }
 
       if (data.user) {
@@ -68,10 +94,10 @@ export const authService = {
     }
 
     // Local persistent mode fallback
-    const profiles = JSON.parse(localStorage.getItem(STORAGE_PROFILES_KEY) || '[]');
-    const existing = profiles.find((p: any) => p.email.toLowerCase() === email.toLowerCase());
+    const profiles: StoredUserProfile[] = JSON.parse(localStorage.getItem(STORAGE_PROFILES_KEY) || '[]');
+    const existing = profiles.find(profile => profile.email.toLowerCase() === email.toLowerCase());
     if (existing) {
-      return { user: null as any, error: 'An account with this email address already exists.' };
+      return { user: null, error: 'An account with this email address already exists.' };
     }
 
     const newUserId = `usr-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
@@ -109,7 +135,7 @@ export const authService = {
   /**
    * User Sign In with Email & Password
    */
-  async signIn(email: string, password: string): Promise<{ user: UserProfile; error?: string }> {
+  async signIn(email: string, password: string): Promise<UserAuthResult> {
     if (isSupabaseConfigured && supabase) {
       const { data, error } = await supabase.auth.signInWithPassword({
         email,
@@ -117,7 +143,7 @@ export const authService = {
       });
 
       if (error) {
-        return { user: null as any, error: error.message };
+        return { user: null, error: error.message };
       }
 
       if (data.user) {
@@ -145,8 +171,8 @@ export const authService = {
     }
 
     // Local fallback
-    const profiles = JSON.parse(localStorage.getItem(STORAGE_PROFILES_KEY) || '[]');
-    const found = profiles.find((p: any) => p.email.toLowerCase() === email.toLowerCase());
+    const profiles: StoredUserProfile[] = JSON.parse(localStorage.getItem(STORAGE_PROFILES_KEY) || '[]');
+    const found = profiles.find(profile => profile.email.toLowerCase() === email.toLowerCase());
     
     // Check against demo accounts if not in custom profiles
     if (!found) {
@@ -181,11 +207,11 @@ export const authService = {
         localStorage.setItem(STORAGE_SESSION_KEY, JSON.stringify(caretakerUser));
         return { user: caretakerUser };
       }
-      return { user: null as any, error: 'Invalid email or password. Please check your credentials.' };
+      return { user: null, error: 'Invalid email or password. Please check your credentials.' };
     }
 
     if (found.password !== password) {
-      return { user: null as any, error: 'Incorrect password entered.' };
+      return { user: null, error: 'Incorrect password entered.' };
     }
 
     const { password: _, ...userSafe } = found;
@@ -197,7 +223,7 @@ export const authService = {
    * Fast Passcode Authentication for Elderly Profile
    * Verifies against salted cryptographic hash server-side
    */
-  async signInWithPasscode(passcode: string): Promise<{ user: UserProfile; elderlyProfile: ElderlyProfile; error?: string }> {
+  async signInWithPasscode(passcode: string): Promise<PasscodeAuthResult> {
     if (isSupabaseConfigured && supabase) {
       const { data: elderlyProfiles } = await supabase
         .from('care_profiles')
@@ -227,7 +253,7 @@ export const authService = {
     // Local verification with cryptographic salted hash
     const elderlyProfiles: ElderlyProfile[] = JSON.parse(localStorage.getItem(STORAGE_ELDERLY_PROFILES_KEY) || '[]');
     if (elderlyProfiles.length === 0) {
-      return { user: null as any, elderlyProfile: null as any, error: 'No elderly healthcare profile registered yet.' };
+      return { user: null, elderlyProfile: null, error: 'No elderly healthcare profile registered yet.' };
     }
 
     const targetProfile = elderlyProfiles[0];
@@ -235,7 +261,7 @@ export const authService = {
     const isValid = Boolean(targetProfile.passcode_hash && targetProfile.passcode_hash === hash);
 
     if (!isValid) {
-      return { user: null as any, elderlyProfile: null as any, error: 'Incorrect 4-digit passcode. Please try again.' };
+      return { user: null, elderlyProfile: null, error: 'Incorrect 4-digit passcode. Please try again.' };
     }
 
     const userProfile: UserProfile = {
@@ -304,7 +330,7 @@ export const authService = {
     emergencyContactName: string;
     emergencyContactPhone: string;
     emergencyContactRelation: string;
-  }): Promise<{ profile: ElderlyProfile; error?: string }> {
+  }): Promise<ProfileResult> {
     const { ownerId, fullName, dateOfBirth, passcode, emergencyContactName, emergencyContactPhone, emergencyContactRelation } = params;
 
     if (isSupabaseConfigured && supabase) {
@@ -312,10 +338,10 @@ export const authService = {
       // not a Supabase Auth identity. Only a real JWT session can satisfy RLS.
       const { data: { user: authUser }, error: authError } = await supabase.auth.getUser();
       if (authError || !authUser) {
-        return { profile: null as any, error: 'A Supabase account session is required to create or update a care profile. Sign in with your account first.' };
+        return { profile: null, error: 'A Supabase account session is required to create or update a care profile. Sign in with your account first.' };
       }
       if (ownerId !== authUser.id) {
-        return { profile: null as any, error: 'The active Supabase account does not own this care profile.' };
+        return { profile: null, error: 'The active Supabase account does not own this care profile.' };
       }
 
       // 1. Write profile records to the actual care_profiles table (never the elderly_profiles view)
@@ -334,7 +360,7 @@ export const authService = {
         .single();
 
       if (profileError) {
-        return { profile: null as any, error: profileError.message };
+        return { profile: null, error: profileError.message };
       }
 
       // 2. Hash and store the 4-digit passcode securely server-side via set_care_passcode RPC
@@ -345,15 +371,12 @@ export const authService = {
         });
 
         if (passcodeError) {
-          return { profile: null as any, error: `Profile created, but failed to set passcode: ${passcodeError.message}` };
+          return { profile: null, error: `Profile created, but failed to set passcode: ${passcodeError.message}` };
         }
       }
 
       // Return clean profile without exposing passcode_hash to frontend
-      const safeProfile: ElderlyProfile = {
-        ...profileRecord,
-      };
-      delete (safeProfile as any).passcode_hash;
+      const safeProfile: ElderlyProfile = { ...profileRecord };
 
       return { profile: safeProfile };
     }
@@ -444,7 +467,7 @@ export const authService = {
     
     const stripPasscodeHash = (p: ElderlyProfile): ElderlyProfile => {
       const copy = { ...p };
-      delete (copy as any).passcode_hash;
+      delete copy.passcode_hash;
       return copy;
     };
 
@@ -536,18 +559,17 @@ export const authService = {
     invitedBy: string;
     invitedEmail: string;
     role: ProfileMemberRole;
-    permissions?: string[];
-  }): Promise<{ invitation: ProfileInvitation; error?: string }> {
+  }): Promise<InvitationResult> {
     const { elderlyProfileId, invitedBy, invitedEmail, role } = params;
 
     if (!isSupabaseConfigured || !supabase) {
-      return { invitation: null as any, error: 'Care Circle requires a configured Supabase connection.' };
+      return { invitation: null, error: 'Care Circle requires a configured Supabase connection.' };
     }
 
     const { data: authData, error: authError } = await supabase.auth.getUser();
-    if (authError) return { invitation: null as any, error: authError.message };
+    if (authError) return { invitation: null, error: authError.message };
     if (!authData.user || authData.user.id !== invitedBy) {
-      return { invitation: null as any, error: 'Unauthorized: Sign in as the profile owner to invite members.' };
+      return { invitation: null, error: 'Unauthorized: Sign in as the profile owner to invite members.' };
     }
 
     const { data, error } = await supabase.rpc('create_profile_invitation', {
@@ -556,7 +578,7 @@ export const authService = {
       p_role: role,
     });
 
-    if (error) return { invitation: null as any, error: error.message };
+    if (error) return { invitation: null, error: error.message };
     return { invitation: data as ProfileInvitation };
   },
 

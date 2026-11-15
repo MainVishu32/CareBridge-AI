@@ -51,6 +51,7 @@ async function testElderlyProfileCreationWorkflow() {
   });
 
   assert(Boolean(signUpRes.user && signUpRes.user.id), 'Elderly Profile Owner account registered successfully');
+  if (!signUpRes.user) throw new Error('Elderly Profile Owner registration did not return a user');
   const ownerId = signUpRes.user.id;
 
   // 2. Submit new elderly profile via createElderlyProfile
@@ -68,6 +69,7 @@ async function testElderlyProfileCreationWorkflow() {
 
   assert(Boolean(createRes.profile), 'Profile created successfully without database/view errors');
   assert(!createRes.error, 'No error returned during profile creation');
+  if (!createRes.profile) throw new Error('Elderly profile creation did not return a profile');
 
   const createdProfile: ElderlyProfile = createRes.profile;
 

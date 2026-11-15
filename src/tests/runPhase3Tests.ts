@@ -11,6 +11,8 @@
  */
 
 // Mock localStorage for node environment testing
+import type { ProfileInvitation, UserProfile } from '../types';
+
 class LocalStorageMock {
   private store: Record<string, string> = {};
   getItem(key: string) { return this.store[key] || null; }
@@ -56,6 +58,14 @@ async function runPhase3TestSuite() {
     }
   }
 
+  function assertHasUser<T extends { user: UserProfile | null }>(result: T, label: string): asserts result is T & { user: UserProfile } {
+    if (!result.user) throw new Error(`${label} did not return a user`);
+  }
+
+  function assertHasInvitation<T extends { invitation: ProfileInvitation | null }>(result: T, label: string): asserts result is T & { invitation: ProfileInvitation } {
+    if (!result.invitation) throw new Error(`${label} did not return an invitation`);
+  }
+
   const { authService } = await import('../services/authService');
   const { dbService } = await import('../services/dbService');
   const { isSupabaseConfigured } = await import('../lib/supabaseClient');
@@ -85,6 +95,7 @@ async function runPhase3TestSuite() {
     fullName: 'Alice Senior',
     role: 'elderly',
   });
+  assertHasUser(ownerA, 'Owner A registration');
   const profileA = await authService.getElderlyProfile(ownerA.user.id, 'elderly');
   assert(Boolean(profileA && profileA.owner_id === ownerA.user.id), 'Profile A created and tied to Owner Alice');
 
@@ -95,6 +106,7 @@ async function runPhase3TestSuite() {
     fullName: 'Carlos Caregiver, CNA',
     role: 'caretaker',
   });
+  assertHasUser(caretaker, 'Caretaker registration');
 
   // Register Family Member
   const family = await authService.signUp({
@@ -103,6 +115,7 @@ async function runPhase3TestSuite() {
     fullName: 'Fiona Family',
     role: 'family_member',
   });
+  assertHasUser(family, 'Family member registration');
 
   // Owner A invites Caretaker Carlos & Family Fiona
   const invCarlos = await authService.createInvitation({
@@ -111,6 +124,7 @@ async function runPhase3TestSuite() {
     invitedEmail: caretaker.user.email,
     role: 'caretaker',
   });
+  assertHasInvitation(invCarlos, 'Caretaker invitation');
   await authService.acceptInvitation(invCarlos.invitation.invite_code, caretaker.user);
 
   const invFiona = await authService.createInvitation({
@@ -119,6 +133,7 @@ async function runPhase3TestSuite() {
     invitedEmail: family.user.email,
     role: 'family_member',
   });
+  assertHasInvitation(invFiona, 'Family member invitation');
   await authService.acceptInvitation(invFiona.invitation.invite_code, family.user);
 
   // Verify Care Circle Members
@@ -273,6 +288,7 @@ async function runPhase3TestSuite() {
     fullName: 'Bob Senior',
     role: 'elderly',
   });
+  assertHasUser(ownerB, 'Owner B registration');
   const profileB = await authService.getElderlyProfile(ownerB.user.id, 'elderly');
   assert(Boolean(profileB && profileB.id !== profileA!.id), 'Independent Profile B created for Bob');
 
@@ -307,6 +323,7 @@ async function runPhase3TestSuite() {
 
   // Re-login as Alice
   const reLogin = await authService.signIn('owner.alice@carebridge.health', 'password123');
+  assertHasUser(reLogin, 'Owner A login');
   assert(reLogin.user.email === 'owner.alice@carebridge.health', 'Alice logged back in');
 
   // Re-fetch Profile A healthcare data

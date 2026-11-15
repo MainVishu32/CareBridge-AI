@@ -1,4 +1,4 @@
-import React, { lazy, Suspense, useMemo, useState } from 'react';
+import React, { lazy, Suspense, useState } from 'react';
 import { TopBar } from './TopBar';
 import { Sidebar } from './Sidebar';
 const OverviewView = lazy(() => import('./views/OverviewView').then(module => ({ default: module.OverviewView })));
@@ -55,14 +55,8 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
   const [inviteSuccess, setInviteSuccess] = useState<string | null>(null);
   const [isRedeeming, setIsRedeeming] = useState(false);
 
-  const pendingMedsCount = useMemo(
-    () => medications.filter(m => m.status === 'pending').length,
-    [medications],
-  );
-  const upcomingAptsCount = useMemo(
-    () => appointments.filter(a => a.status === 'upcoming').length,
-    [appointments],
-  );
+  const pendingMedsCount = medications.filter(m => m.status === 'pending').length;
+  const upcomingAptsCount = appointments.filter(a => a.status === 'upcoming').length;
 
   const handleRedeemInvite = async (e: React.FormEvent) => {
     e.preventDefault();

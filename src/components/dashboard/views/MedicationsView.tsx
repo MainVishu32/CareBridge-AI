@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useState } from 'react';
 import { 
   Pill, 
   Plus, 
@@ -42,15 +42,13 @@ export const MedicationsView: React.FC<MedicationsViewProps> = ({
   const [newInstructions, setNewInstructions] = useState('');
   const [newDoctor, setNewDoctor] = useState('');
 
-  const filteredMeds = useMemo(() => {
-    const normalizedQuery = searchQuery.toLowerCase();
-    return medications.filter((med) => {
-      const matchesTime = activeFilterTime === 'All' || med.timeOfDay === activeFilterTime;
-      const matchesSearch = med.name.toLowerCase().includes(normalizedQuery) ||
-                            med.purpose.toLowerCase().includes(normalizedQuery);
-      return matchesTime && matchesSearch;
-    });
-  }, [medications, activeFilterTime, searchQuery]);
+  const normalizedQuery = searchQuery.toLowerCase();
+  const filteredMeds = medications.filter((med) => {
+    const matchesTime = activeFilterTime === 'All' || med.timeOfDay === activeFilterTime;
+    const matchesSearch = med.name.toLowerCase().includes(normalizedQuery) ||
+                          med.purpose.toLowerCase().includes(normalizedQuery);
+    return matchesTime && matchesSearch;
+  });
 
   const handleAddSubmit = (e: React.FormEvent) => {
     e.preventDefault();

@@ -11,7 +11,6 @@ const DashboardLayout = lazy(() => import('./components/dashboard/DashboardLayou
 import { 
   Medication, 
   Appointment, 
-  HealthMetric, 
   AccessibilitySettings,
   AuthMode 
 } from './types';
@@ -39,7 +38,6 @@ const AppContent: React.FC = () => {
   // If user is logged in, use live database data; if guest preview, fallback to initial
   const activeMedications = user ? dbMedications : initialMedications;
   const activeAppointments = user ? dbAppointments : initialAppointments;
-  const [vitals] = useState<HealthMetric[]>(initialVitals);
 
   // Accessibility State
   const [accessibility, setAccessibility] = useState<AccessibilitySettings>({
@@ -164,7 +162,7 @@ const AppContent: React.FC = () => {
           <DashboardLayout
             medications={activeMedications}
             appointments={activeAppointments}
-            vitals={vitals}
+            vitals={initialVitals}
             accessibility={accessibility}
             onUpdateAccessibility={(updates) => setAccessibility(prev => ({ ...prev, ...updates }))}
             onMarkMedTaken={handleMarkMedTaken}

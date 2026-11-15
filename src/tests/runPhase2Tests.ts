@@ -14,6 +14,7 @@
  */
 
 import { hashPasscode, verifyPasscode, generateInvitationCode } from '../lib/cryptoUtils';
+import type { ProfileInvitation, UserProfile } from '../types';
 
 // Mock localStorage for node environment testing
 class LocalStorageMock {
@@ -58,6 +59,14 @@ async function runTestSuite() {
     }
   }
 
+  function assertHasUser<T extends { user: UserProfile | null }>(result: T, label: string): asserts result is T & { user: UserProfile } {
+    if (!result.user) throw new Error(`${label} did not return a user`);
+  }
+
+  function assertHasInvitation<T extends { invitation: ProfileInvitation | null }>(result: T, label: string): asserts result is T & { invitation: ProfileInvitation } {
+    if (!result.invitation) throw new Error(`${label} did not return an invitation`);
+  }
+
   // --- Baseline Cryptography & Password Security ---
   const { hash, salt } = await hashPasscode('4321', 'test_salt_123');
   assert(hash !== '4321', 'Passcode is cryptographically hashed with salt and not stored in plain text');
@@ -82,6 +91,7 @@ async function runTestSuite() {
     role: 'elderly',
     phone: '+1 555-111-2222',
   });
+  assertHasUser(ownerA, 'Owner A registration');
   assert(ownerA.user.role === 'elderly', 'Elderly Profile Owner A registered successfully');
 
   // Verify Elderly Profile A is created
@@ -95,6 +105,7 @@ async function runTestSuite() {
     fullName: 'Maria Caretaker',
     role: 'caretaker',
   });
+  assertHasUser(caretakerUser, 'Caretaker registration');
   assert(caretakerUser.user.role === 'caretaker', 'Caretaker registered successfully');
 
   // Register Family Member User
@@ -104,6 +115,7 @@ async function runTestSuite() {
     fullName: 'David Family',
     role: 'family_member',
   });
+  assertHasUser(familyUser, 'Family member registration');
   assert(familyUser.user.role === 'family_member', 'Family Member registered successfully');
 
   // =========================================================================
@@ -116,6 +128,7 @@ async function runTestSuite() {
     invitedEmail: 'david.family@carebridge.health',
     role: 'family_member',
   });
+  assertHasInvitation(familyInviteRes, 'Family invitation');
   assert(Boolean(familyInviteRes.invitation), 'Family member invitation object created');
   assert(familyInviteRes.invitation.role === 'family_member', 'Invitation assigned role is family_member');
   assert(familyInviteRes.invitation.elderly_profile_id === profileA!.id, 'Invitation associated with correct elderly profile ID');
@@ -130,6 +143,7 @@ async function runTestSuite() {
     invitedEmail: 'maria.caretaker@carebridge.health',
     role: 'caretaker',
   });
+  assertHasInvitation(caretakerInviteRes, 'Caretaker invitation');
   assert(Boolean(caretakerInviteRes.invitation), 'Caretaker invitation object created');
   assert(caretakerInviteRes.invitation.role === 'caretaker', 'Invitation assigned role is caretaker');
 
@@ -189,6 +203,7 @@ async function runTestSuite() {
     invitedEmail: 'expired.test@example.com',
     role: 'family_member',
   });
+  assertHasInvitation(expiredInvite, 'Expired invitation fixture');
   // Manually backdate expiry to simulate expired code
   const allInvites = JSON.parse(localStorage.getItem('carebridge_db_invitations') || '[]');
   const expIdx = allInvites.findIndex((i: any) => i.id === expiredInvite.invitation.id);
@@ -246,6 +261,7 @@ async function runTestSuite() {
     fullName: 'Robert Owner B',
     role: 'elderly',
   });
+  assertHasUser(ownerB, 'Owner B registration');
   const profileB = await authService.getElderlyProfile(ownerB.user.id, 'elderly');
   assert(Boolean(profileB && profileB.id !== profileA!.id), 'Second Profile B created independently');
 
@@ -256,6 +272,7 @@ async function runTestSuite() {
     fullName: 'Nurse Sarah',
     role: 'caretaker',
   });
+  assertHasUser(sharedCaretaker, 'Shared caretaker registration');
 
   // Owner A invites shared caretaker to Profile A
   const inviteFromA = await authService.createInvitation({
@@ -264,6 +281,7 @@ async function runTestSuite() {
     invitedEmail: 'shared.nurse@carebridge.health',
     role: 'caretaker',
   });
+  assertHasInvitation(inviteFromA, 'Profile A invitation');
   await authService.acceptInvitation(inviteFromA.invitation.invite_code, sharedCaretaker.user);
 
   // Owner B invites shared caretaker to Profile B
@@ -273,6 +291,7 @@ async function runTestSuite() {
     invitedEmail: 'shared.nurse@carebridge.health',
     role: 'caretaker',
   });
+  assertHasInvitation(inviteFromB, 'Profile B invitation');
   await authService.acceptInvitation(inviteFromB.invitation.invite_code, sharedCaretaker.user);
 
   // Verify shared caretaker is in both profiles
