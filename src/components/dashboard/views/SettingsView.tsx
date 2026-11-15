@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { 
   Eye, 
   Bell, 
@@ -27,12 +27,21 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [emergencyPhone, setEmergencyPhone] = useState(user.emergencyContact?.phone || '');
   const [emergencyRel, setEmergencyRel] = useState(user.emergencyContact?.relationship || '');
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => () => {
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+  }, []);
 
   const handleSaveContact = (e: React.FormEvent) => {
     e.preventDefault();
     onUpdateEmergencyContact(emergencyName, emergencyPhone, emergencyRel);
+    if (saveTimer.current) clearTimeout(saveTimer.current);
     setSaveSuccess(true);
-    setTimeout(() => setSaveSuccess(false), 3000);
+    saveTimer.current = setTimeout(() => {
+      setSaveSuccess(false);
+      saveTimer.current = null;
+    }, 3000);
   };
 
   return (

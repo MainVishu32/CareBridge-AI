@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { 
   UserPlus, 
   Phone, 
@@ -32,7 +32,8 @@ export const CareCircleView: React.FC = () => {
     canRevokeMember, 
     inviteMember, 
     revokeMember,
-    isLoading,
+    isCareCircleLoading,
+    refreshCareCircleData,
     error: profileDataError,
   } = useAuth();
 
@@ -49,6 +50,15 @@ export const CareCircleView: React.FC = () => {
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const copiedCodeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => () => {
+    if (copiedCodeTimer.current) clearTimeout(copiedCodeTimer.current);
+  }, []);
+
+  useEffect(() => {
+    void refreshCareCircleData();
+  }, [refreshCareCircleData]);
 
   const handleCreateInvite = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -112,7 +122,11 @@ export const CareCircleView: React.FC = () => {
     try {
       await navigator.clipboard.writeText(code);
       setCopiedCode(code);
-      setTimeout(() => setCopiedCode(null), 2500);
+      if (copiedCodeTimer.current) clearTimeout(copiedCodeTimer.current);
+      copiedCodeTimer.current = setTimeout(() => {
+        setCopiedCode(null);
+        copiedCodeTimer.current = null;
+      }, 2500);
     } catch {
       setActionError('Unable to copy the invitation code. Select and copy it manually.');
     }
@@ -268,7 +282,7 @@ export const CareCircleView: React.FC = () => {
           Authorized Members Connected ({activeMembers.length})
         </h3>
 
-        {isLoading ? (
+        {isCareCircleLoading ? (
           <div role="status" className="p-8 text-center bg-white rounded-2xl border border-slate-200 text-sm text-slate-500">
             Loading care circle members...
           </div>

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { 
   HeartPulse, 
   KeyRound, 
@@ -44,6 +44,11 @@ export const AuthView: React.FC<AuthViewProps> = ({
   const [localError, setLocalError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const redirectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => () => {
+    if (redirectTimer.current) clearTimeout(redirectTimer.current);
+  }, []);
 
   // Passcode State for Fast Senior Access
   const [passcode, setPasscode] = useState<string[]>(['', '', '', '']);
@@ -187,7 +192,10 @@ export const AuthView: React.FC<AuthViewProps> = ({
           return;
         }
         setSuccessMessage('Invitation accepted! Redirecting to connected profile...');
-        setTimeout(() => onSuccess(), 1000);
+        redirectTimer.current = setTimeout(() => {
+          onSuccess();
+          redirectTimer.current = null;
+        }, 1000);
       }
     } catch (error) {
       setLocalError(error instanceof Error ? error.message : 'The request could not be completed. Please try again.');

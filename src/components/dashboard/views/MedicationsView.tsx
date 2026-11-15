@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { 
   Pill, 
   Plus, 
@@ -15,6 +15,8 @@ import { Button } from '../../common/Button';
 import { Badge } from '../../common/Badge';
 import { Input } from '../../common/Input';
 import { Medication, MedicationTimeOfDay } from '../../../types';
+
+const TIME_FILTER_OPTIONS = ['All', 'Morning', 'Afternoon', 'Evening', 'Bedtime'];
 
 interface MedicationsViewProps {
   medications: Medication[];
@@ -40,14 +42,15 @@ export const MedicationsView: React.FC<MedicationsViewProps> = ({
   const [newInstructions, setNewInstructions] = useState('');
   const [newDoctor, setNewDoctor] = useState('');
 
-  const timeFilterOptions = ['All', 'Morning', 'Afternoon', 'Evening', 'Bedtime'];
-
-  const filteredMeds = medications.filter((med) => {
-    const matchesTime = activeFilterTime === 'All' || med.timeOfDay === activeFilterTime;
-    const matchesSearch = med.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                          med.purpose.toLowerCase().includes(searchQuery.toLowerCase());
-    return matchesTime && matchesSearch;
-  });
+  const filteredMeds = useMemo(() => {
+    const normalizedQuery = searchQuery.toLowerCase();
+    return medications.filter((med) => {
+      const matchesTime = activeFilterTime === 'All' || med.timeOfDay === activeFilterTime;
+      const matchesSearch = med.name.toLowerCase().includes(normalizedQuery) ||
+                            med.purpose.toLowerCase().includes(normalizedQuery);
+      return matchesTime && matchesSearch;
+    });
+  }, [medications, activeFilterTime, searchQuery]);
 
   const handleAddSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -108,7 +111,7 @@ export const MedicationsView: React.FC<MedicationsViewProps> = ({
           <span className="text-xs font-bold text-slate-400 uppercase tracking-wider px-2 shrink-0">
             Time:
           </span>
-          {timeFilterOptions.map((time) => (
+          {TIME_FILTER_OPTIONS.map((time) => (
             <button
               key={time}
               onClick={() => setActiveFilterTime(time)}

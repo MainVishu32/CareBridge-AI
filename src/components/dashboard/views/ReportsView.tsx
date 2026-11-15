@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { 
   FileText, 
   Download, 
@@ -22,10 +22,19 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   patientName,
 }) => {
   const [downloadSuccess, setDownloadSuccess] = useState(false);
+  const downloadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => () => {
+    if (downloadTimer.current) clearTimeout(downloadTimer.current);
+  }, []);
 
   const handleDownloadReport = () => {
+    if (downloadTimer.current) clearTimeout(downloadTimer.current);
     setDownloadSuccess(true);
-    setTimeout(() => setDownloadSuccess(false), 4000);
+    downloadTimer.current = setTimeout(() => {
+      setDownloadSuccess(false);
+      downloadTimer.current = null;
+    }, 4000);
   };
 
   const weeklyAdherenceDays = [

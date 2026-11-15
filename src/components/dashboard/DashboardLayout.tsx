@@ -1,13 +1,13 @@
-import React, { useState } from 'react';
+import React, { lazy, Suspense, useMemo, useState } from 'react';
 import { TopBar } from './TopBar';
 import { Sidebar } from './Sidebar';
-import { OverviewView } from './views/OverviewView';
-import { MedicationsView } from './views/MedicationsView';
-import { AppointmentsView } from './views/AppointmentsView';
-import { CareCircleView } from './views/CareCircleView';
-import { ReportsView } from './views/ReportsView';
-import { SettingsView } from './views/SettingsView';
-import { CreateElderlyProfileModal } from './CreateElderlyProfileModal';
+const OverviewView = lazy(() => import('./views/OverviewView').then(module => ({ default: module.OverviewView })));
+const MedicationsView = lazy(() => import('./views/MedicationsView').then(module => ({ default: module.MedicationsView })));
+const AppointmentsView = lazy(() => import('./views/AppointmentsView').then(module => ({ default: module.AppointmentsView })));
+const CareCircleView = lazy(() => import('./views/CareCircleView').then(module => ({ default: module.CareCircleView })));
+const ReportsView = lazy(() => import('./views/ReportsView').then(module => ({ default: module.ReportsView })));
+const SettingsView = lazy(() => import('./views/SettingsView').then(module => ({ default: module.SettingsView })));
+const CreateElderlyProfileModal = lazy(() => import('./CreateElderlyProfileModal').then(module => ({ default: module.CreateElderlyProfileModal })));
 import { 
   NavigationTab, 
   Medication, 
@@ -55,8 +55,14 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
   const [inviteSuccess, setInviteSuccess] = useState<string | null>(null);
   const [isRedeeming, setIsRedeeming] = useState(false);
 
-  const pendingMedsCount = medications.filter(m => m.status === 'pending').length;
-  const upcomingAptsCount = appointments.filter(a => a.status === 'upcoming').length;
+  const pendingMedsCount = useMemo(
+    () => medications.filter(m => m.status === 'pending').length,
+    [medications],
+  );
+  const upcomingAptsCount = useMemo(
+    () => appointments.filter(a => a.status === 'upcoming').length,
+    [appointments],
+  );
 
   const handleRedeemInvite = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -209,59 +215,65 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
             </div>
           )}
 
-          {currentTab === 'overview' && (
-            <OverviewView
-              medications={medications}
-              appointments={appointments}
-              vitals={vitals}
-              onMarkMedTaken={onMarkMedTaken}
-              onNavigateTab={setCurrentTab}
-            />
-          )}
+          <Suspense fallback={<div className="p-6 text-sm text-slate-500" role="status">Loading dashboard section...</div>}>
+            {currentTab === 'overview' && (
+              <OverviewView
+                medications={medications}
+                appointments={appointments}
+                vitals={vitals}
+                onMarkMedTaken={onMarkMedTaken}
+                onNavigateTab={setCurrentTab}
+              />
+            )}
 
-          {currentTab === 'medications' && (
-            <MedicationsView
-              medications={medications}
-              onMarkTaken={onMarkMedTaken}
-              onAddMedication={onAddMedication}
-            />
-          )}
+            {currentTab === 'medications' && (
+              <MedicationsView
+                medications={medications}
+                onMarkTaken={onMarkMedTaken}
+                onAddMedication={onAddMedication}
+              />
+            )}
 
-          {currentTab === 'appointments' && (
-            <AppointmentsView
-              appointments={appointments}
-              onAddAppointment={onAddAppointment}
-            />
-          )}
+            {currentTab === 'appointments' && (
+              <AppointmentsView
+                appointments={appointments}
+                onAddAppointment={onAddAppointment}
+              />
+            )}
 
-          {currentTab === 'care-circle' && (
-            <CareCircleView />
-          )}
+            {currentTab === 'care-circle' && (
+              <CareCircleView />
+            )}
 
-          {currentTab === 'reports' && (
-            <ReportsView
-              vitals={vitals}
-              patientName={elderlyProfile?.full_name || activeUser.name}
-            />
-          )}
+            {currentTab === 'reports' && (
+              <ReportsView
+                vitals={vitals}
+                patientName={elderlyProfile?.full_name || activeUser.name}
+              />
+            )}
 
-          {currentTab === 'settings' && (
-            <SettingsView
-              user={activeUser}
-              accessibility={accessibility}
-              onUpdateAccessibility={onUpdateAccessibility}
-              onUpdateEmergencyContact={onUpdateEmergencyContact}
-            />
-          )}
+            {currentTab === 'settings' && (
+              <SettingsView
+                user={activeUser}
+                accessibility={accessibility}
+                onUpdateAccessibility={onUpdateAccessibility}
+                onUpdateEmergencyContact={onUpdateEmergencyContact}
+              />
+            )}
+          </Suspense>
         </main>
       </div>
 
       {/* Profile Creation Modal */}
-      <CreateElderlyProfileModal
-        isOpen={showCreateModal}
-        onClose={() => setShowCreateModal(false)}
-        onCompleted={() => setShowCreateModal(false)}
-      />
+      {showCreateModal && (
+        <Suspense fallback={null}>
+          <CreateElderlyProfileModal
+            isOpen={showCreateModal}
+            onClose={() => setShowCreateModal(false)}
+            onCompleted={() => setShowCreateModal(false)}
+          />
+        </Suspense>
+      )}
     </div>
   );
 };

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { lazy, Suspense, useState, useEffect } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { LandingHeader } from './components/landing/Header';
 import { HeroSection } from './components/landing/HeroSection';
@@ -6,8 +6,8 @@ import { FeaturesSection } from './components/landing/FeaturesSection';
 import { AudienceSection } from './components/landing/AudienceSection';
 import { TestimonialSection } from './components/landing/TestimonialSection';
 import { Footer } from './components/landing/Footer';
-import { AuthView } from './components/auth/AuthView';
-import { DashboardLayout } from './components/dashboard/DashboardLayout';
+const AuthView = lazy(() => import('./components/auth/AuthView').then(module => ({ default: module.AuthView })));
+const DashboardLayout = lazy(() => import('./components/dashboard/DashboardLayout').then(module => ({ default: module.DashboardLayout })));
 import { 
   Medication, 
   Appointment, 
@@ -37,8 +37,8 @@ const AppContent: React.FC = () => {
   
   // Dynamic medications & appointments linked to Supabase/Database service
   // If user is logged in, use live database data; if guest preview, fallback to initial
-  const activeMedications = user && dbMedications.length > 0 ? dbMedications : initialMedications;
-  const activeAppointments = user && dbAppointments.length > 0 ? dbAppointments : initialAppointments;
+  const activeMedications = user ? dbMedications : initialMedications;
+  const activeAppointments = user ? dbAppointments : initialAppointments;
   const [vitals] = useState<HealthMetric[]>(initialVitals);
 
   // Accessibility State
@@ -149,26 +149,30 @@ const AppContent: React.FC = () => {
 
       {/* 2. AUTHENTICATION VIEW (Passcode / Login / Register / Invite) */}
       {view === 'auth' && (
-        <AuthView
-          initialMode={authMode}
-          onSuccess={handleAuthSuccess}
-          onBackToLanding={() => setView('landing')}
-        />
+        <Suspense fallback={<div className="min-h-screen bg-slate-50" role="status">Loading CareBridge...</div>}>
+          <AuthView
+            initialMode={authMode}
+            onSuccess={handleAuthSuccess}
+            onBackToLanding={() => setView('landing')}
+          />
+        </Suspense>
       )}
 
       {/* 3. DASHBOARD VIEW (Protected by Authentication & Roles) */}
       {view === 'dashboard' && (
-        <DashboardLayout
-          medications={activeMedications}
-          appointments={activeAppointments}
-          vitals={vitals}
-          accessibility={accessibility}
-          onUpdateAccessibility={(updates) => setAccessibility(prev => ({ ...prev, ...updates }))}
-          onMarkMedTaken={handleMarkMedTaken}
-          onAddMedication={handleAddMedication}
-          onAddAppointment={handleAddAppointment}
-          onUpdateEmergencyContact={handleUpdateEmergencyContact}
-        />
+        <Suspense fallback={<div className="min-h-screen bg-slate-50" role="status">Loading CareBridge...</div>}>
+          <DashboardLayout
+            medications={activeMedications}
+            appointments={activeAppointments}
+            vitals={vitals}
+            accessibility={accessibility}
+            onUpdateAccessibility={(updates) => setAccessibility(prev => ({ ...prev, ...updates }))}
+            onMarkMedTaken={handleMarkMedTaken}
+            onAddMedication={handleAddMedication}
+            onAddAppointment={handleAddAppointment}
+            onUpdateEmergencyContact={handleUpdateEmergencyContact}
+          />
+        </Suspense>
       )}
 
     </div>

@@ -380,40 +380,51 @@ export const dbService = {
       const { data, error } = await supabase
         .from('medications')
         .select(`
-          *,
-          medication_schedules (*),
-          medication_logs (*)
+          id,
+          elderly_profile_id,
+          name,
+          dosage,
+          purpose,
+          instructions,
+          prescribing_doctor,
+          pill_color,
+          remaining_count,
+          refill_threshold,
+          refill_needed,
+          medication_schedules (schedule_time, time_of_day, is_active),
+          medication_logs (status, scheduled_for)
         `)
         .eq('elderly_profile_id', elderlyProfileId)
         .eq('is_active', true)
-        .order('created_at', { ascending: true });
+        .eq('medication_schedules.is_active', true)
+        .order('created_at', { ascending: true })
+        .order('scheduled_for', { referencedTable: 'medication_logs', ascending: false })
+        .limit(1, { referencedTable: 'medication_logs' });
 
       if (error) {
         return { data: [], error: error.message };
       }
 
-      if (data && data.length > 0) {
-        const mapped = data.map((item: any) => {
-          const schedule = item.medication_schedules?.[0];
-          const latestLog = item.medication_logs?.[item.medication_logs.length - 1];
-          return {
-            id: item.id,
-            elderlyProfileId: item.elderly_profile_id,
-            name: item.name,
-            dosage: item.dosage,
-            scheduleTime: schedule ? schedule.schedule_time.slice(0, 5) : '08:00 AM',
-            timeOfDay: schedule ? schedule.time_of_day : 'Morning',
-            purpose: item.purpose || '',
-            instructions: item.instructions || '',
-            status: (latestLog?.status || 'pending') as 'taken' | 'pending' | 'missed',
-            pillColor: item.pill_color || 'bg-blue-100 text-blue-700 border-blue-300',
-            remainingCount: item.remaining_count ?? 30,
-            refillNeeded: Boolean(item.refill_needed || (item.remaining_count <= item.refill_threshold)),
-            prescribingDoctor: item.prescribing_doctor || 'Primary Care Physician',
-          };
-        });
-        return { data: mapped };
-      }
+      const mapped = (data || []).map((item: any) => {
+        const schedule = item.medication_schedules?.[0];
+        const latestLog = item.medication_logs?.[0];
+        return {
+          id: item.id,
+          elderlyProfileId: item.elderly_profile_id,
+          name: item.name,
+          dosage: item.dosage,
+          scheduleTime: schedule ? schedule.schedule_time.slice(0, 5) : '08:00 AM',
+          timeOfDay: schedule ? schedule.time_of_day : 'Morning',
+          purpose: item.purpose || '',
+          instructions: item.instructions || '',
+          status: (latestLog?.status || 'pending') as 'taken' | 'pending' | 'missed',
+          pillColor: item.pill_color || 'bg-blue-100 text-blue-700 border-blue-300',
+          remainingCount: item.remaining_count ?? 30,
+          refillNeeded: Boolean(item.refill_needed || (item.remaining_count <= item.refill_threshold)),
+          prescribingDoctor: item.prescribing_doctor || 'Primary Care Physician',
+        };
+      });
+      return { data: mapped };
     }
 
     // Local persistent database fallback
@@ -488,7 +499,7 @@ export const dbService = {
           refill_threshold: refillThreshold,
           refill_needed: remainingCount <= refillThreshold,
         })
-        .select()
+        .select('id')
         .single();
 
       if (medError || !medData) {
@@ -706,7 +717,7 @@ export const dbService = {
     if (isSupabaseConfigured && supabase) {
       const { data, error } = await supabase
         .from('appointments')
-        .select('*')
+        .select('id, elderly_profile_id, title, doctor_name, specialty, clinic_name, address, appointment_date, appointment_time, appointment_type, transport_arranged, notes, status')
         .eq('elderly_profile_id', elderlyProfileId)
         .order('appointment_date', { ascending: true });
 
@@ -714,24 +725,22 @@ export const dbService = {
         return { data: [], error: error.message };
       }
 
-      if (data && data.length > 0) {
-        const mapped = data.map((item: any) => ({
-          id: item.id,
-          elderlyProfileId: item.elderly_profile_id,
-          title: item.title,
-          doctorName: item.doctor_name,
-          specialty: item.specialty,
-          clinicName: item.clinic_name,
-          address: item.address || '',
-          date: item.appointment_date,
-          time: item.appointment_time ? item.appointment_time.slice(0, 5) : '10:00 AM',
-          type: item.appointment_type,
-          transportArranged: item.transport_arranged,
-          notes: item.notes || '',
-          status: item.status,
-        }));
-        return { data: mapped };
-      }
+      const mapped = (data || []).map((item: any) => ({
+        id: item.id,
+        elderlyProfileId: item.elderly_profile_id,
+        title: item.title,
+        doctorName: item.doctor_name,
+        specialty: item.specialty,
+        clinicName: item.clinic_name,
+        address: item.address || '',
+        date: item.appointment_date,
+        time: item.appointment_time ? item.appointment_time.slice(0, 5) : '10:00 AM',
+        type: item.appointment_type,
+        transportArranged: item.transport_arranged,
+        notes: item.notes || '',
+        status: item.status,
+      }));
+      return { data: mapped };
     }
 
     // Local persistent database fallback
@@ -799,7 +808,7 @@ export const dbService = {
           status: 'upcoming',
           created_by: currentUserId || null,
         })
-        .select()
+        .select('id')
         .single();
 
       if (error || !data) {
@@ -897,7 +906,7 @@ export const dbService = {
     if (isSupabaseConfigured && supabase) {
       const query = supabase
         .from('notifications')
-        .select('*')
+        .select('id, elderly_profile_id, recipient_user_id, title, message, type, is_read, read_at, link_url, metadata, created_at')
         .eq('elderly_profile_id', elderlyProfileId)
         .order('created_at', { ascending: false });
 

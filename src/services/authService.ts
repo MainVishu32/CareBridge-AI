@@ -54,34 +54,7 @@ export const authService = {
       }
 
       if (data.user) {
-        // Upsert into public.profiles
-        const { error: profileError } = await supabase.from('profiles').upsert({
-          id: data.user.id,
-          email,
-          full_name: fullName,
-          role,
-          phone: phone || '',
-          updated_at: new Date().toISOString(),
-        });
-        if (profileError) {
-          return { user: null as any, error: profileError.message };
-        }
-
-        // If registered as Elderly Individual, provision their elderly_profiles record immediately
-        if (role === 'elderly') {
-          const { error: careProfileError } = await supabase.from('care_profiles').upsert({
-            owner_id: data.user.id,
-            full_name: fullName,
-            emergency_contact_name: null,
-            emergency_contact_phone: phone || null,
-            emergency_contact_relation: null,
-            updated_at: new Date().toISOString(),
-          }, { onConflict: 'owner_id' });
-          if (careProfileError) {
-            return { user: null as any, error: careProfileError.message };
-          }
-        }
-
+        // The auth.users trigger provisions profiles and owner care profiles.
         const userProfile: UserProfile = {
           id: data.user.id,
           name: fullName,
@@ -151,7 +124,7 @@ export const authService = {
         // Fetch user's registered role from profiles table
         const { data: profileData } = await supabase
           .from('profiles')
-          .select('*')
+          .select('id, email, full_name, role, phone')
           .eq('id', data.user.id)
           .single();
 
@@ -526,7 +499,7 @@ export const authService = {
 
     const { data: memberRows, error: membersError } = await supabase
       .from('profile_members')
-      .select('*')
+      .select('id, elderly_profile_id, user_id, role, status, permissions, invited_at, accepted_at, revoked_at')
       .eq('elderly_profile_id', elderlyProfileId)
       .order('invited_at', { ascending: false });
 

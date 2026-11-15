@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useCallback, useContext, useState, useEffect } from 'react';
 import { 
   UserProfile, 
   ElderlyProfile, 
@@ -24,6 +24,7 @@ interface AuthContextType {
   appointments: Appointment[];
   notifications: DbNotification[];
   isLoading: boolean;
+  isCareCircleLoading: boolean;
   error: string | null;
   
   // Auth methods
@@ -45,6 +46,7 @@ interface AuthContextType {
   verifyInvitation: (inviteCode: string, email: string) => Promise<{ role?: ProfileMemberRole; error?: string }>;
   acceptInvitation: (inviteCode: string) => Promise<{ success: boolean; error?: string }>;
   revokeMember: (memberId: string) => Promise<{ success: boolean; error?: string }>;
+  refreshCareCircleData: () => Promise<void>;
   refreshProfileData: () => Promise<void>;
 
   // Healthcare Database Operations
@@ -74,6 +76,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [notifications, setNotifications] = useState<DbNotification[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [isCareCircleLoading, setIsCareCircleLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Load session on startup
@@ -116,6 +119,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setElderlyProfile(null);
           setMembers([]);
           setPendingInvitations([]);
+          setIsCareCircleLoading(false);
           setMedications([]);
           setAppointments([]);
           setNotifications([]);
@@ -133,6 +137,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setError(null);
     setMembers([]);
     setPendingInvitations([]);
+    setIsCareCircleLoading(false);
     setMedications([]);
     setAppointments([]);
     setNotifications([]);
@@ -141,32 +146,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setElderlyProfile(ep);
 
       if (ep) {
-        // 1. Fetch Care Circle Members
-        const mems = await authService.getProfileMembers(ep.id, currentUser.id);
-        setMembers(mems);
+        const [medsRes, aptsRes, notifsRes] = await Promise.all([
+          dbService.getMedications(ep.id, currentUser.id),
+          dbService.getAppointments(ep.id, currentUser.id),
+          dbService.getNotifications(ep.id, currentUser.id),
+        ]);
 
-        // 2. Fetch Pending Invitations (Profile Owner only)
-        if (currentUser.role === 'elderly' && ep.owner_id === currentUser.id) {
-          const invites = await authService.getPendingInvitations(ep.id, currentUser.id);
-          setPendingInvitations(invites);
-        } else {
-          setPendingInvitations([]);
-        }
-
-        // 3. Fetch Medications from Database
-        const medsRes = await dbService.getMedications(ep.id, currentUser.id);
         if (medsRes.data) {
           setMedications(medsRes.data);
         }
 
-        // 4. Fetch Doctor Appointments from Database
-        const aptsRes = await dbService.getAppointments(ep.id, currentUser.id);
         if (aptsRes.data) {
           setAppointments(aptsRes.data);
         }
 
-        // 5. Fetch Notifications from Database
-        const notifsRes = await dbService.getNotifications(ep.id, currentUser.id);
         if (notifsRes.data) {
           setNotifications(notifsRes.data);
         }
@@ -188,6 +181,32 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       await loadHealthcareData(user);
     }
   };
+
+  const refreshCareCircleData = useCallback(async () => {
+    if (!user || !elderlyProfile) {
+      setMembers([]);
+      setPendingInvitations([]);
+      return;
+    }
+
+    setIsCareCircleLoading(true);
+    try {
+      const isProfileOwner = user.role === 'elderly' && elderlyProfile.owner_id === user.id;
+      const [profileMembers, invitations] = await Promise.all([
+        authService.getProfileMembers(elderlyProfile.id, user.id),
+        isProfileOwner
+          ? authService.getPendingInvitations(elderlyProfile.id, user.id)
+          : Promise.resolve([]),
+      ]);
+      setMembers(profileMembers);
+      setPendingInvitations(invitations);
+    } catch (err) {
+      console.error('Error loading Care Circle data:', err);
+      setError('Unable to load secure care circle data. Please try again.');
+    } finally {
+      setIsCareCircleLoading(false);
+    }
+  }, [user, elderlyProfile]);
 
   const signIn = async (email: string, password: string) => {
     setError(null);
@@ -258,6 +277,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setElderlyProfile(null);
     setMembers([]);
     setPendingInvitations([]);
+    setIsCareCircleLoading(false);
     setMedications([]);
     setAppointments([]);
     setNotifications([]);
@@ -446,6 +466,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         appointments,
         notifications,
         isLoading,
+        isCareCircleLoading,
         error,
         signIn,
         signUp,
@@ -456,6 +477,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         verifyInvitation: authService.verifyInvitation,
         acceptInvitation,
         revokeMember,
+        refreshCareCircleData,
         refreshProfileData,
         markMedicationTaken,
         addMedication,
