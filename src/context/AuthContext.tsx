@@ -1,0 +1,425 @@
+import React, { createContext, useContext, useState, useEffect } from 'react';
+import { 
+  UserProfile, 
+  ElderlyProfile, 
+  ProfileMember, 
+  ProfileInvitation, 
+  UserRole,
+  ProfileMemberRole,
+  Medication,
+  Appointment,
+  DbNotification
+} from '../types';
+import { authService } from '../services/authService';
+import { dbService } from '../services/dbService';
+
+interface AuthContextType {
+  user: UserProfile | null;
+  elderlyProfile: ElderlyProfile | null;
+  role: UserRole | null;
+  members: ProfileMember[];
+  pendingInvitations: ProfileInvitation[];
+  medications: Medication[];
+  appointments: Appointment[];
+  notifications: DbNotification[];
+  isLoading: boolean;
+  error: string | null;
+  
+  // Auth methods
+  signIn: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
+  signUp: (params: { email: string; password: string; fullName: string; role: UserRole; phone?: string }) => Promise<{ success: boolean; error?: string }>;
+  signInWithPasscode: (passcode: string) => Promise<{ success: boolean; error?: string }>;
+  signOut: () => Promise<void>;
+
+  // Profile & Invitation methods
+  createElderlyProfile: (params: {
+    fullName: string;
+    dateOfBirth?: string;
+    passcode: string;
+    emergencyContactName: string;
+    emergencyContactPhone: string;
+    emergencyContactRelation: string;
+  }) => Promise<{ success: boolean; error?: string }>;
+  inviteMember: (email: string, role: ProfileMemberRole, permissions?: string[]) => Promise<{ invitation: ProfileInvitation | null; error?: string }>;
+  acceptInvitation: (inviteCode: string) => Promise<{ success: boolean; error?: string }>;
+  revokeMember: (memberId: string) => Promise<{ success: boolean; error?: string }>;
+  refreshProfileData: () => Promise<void>;
+
+  // Healthcare Database Operations
+  markMedicationTaken: (id: string) => Promise<{ success: boolean; error?: string }>;
+  addMedication: (med: Omit<Medication, 'id'>) => Promise<{ success: boolean; error?: string }>;
+  addAppointment: (apt: Omit<Appointment, 'id'>) => Promise<{ success: boolean; error?: string }>;
+  markNotificationAsRead: (id: string) => Promise<void>;
+
+  // Permission helpers
+  isOwner: boolean;
+  isCaretaker: boolean;
+  isFamilyMember: boolean;
+  canManageMembers: boolean;
+  canManageActivities: boolean;
+  canViewHealth: boolean;
+  canRevokeMember: boolean;
+}
+
+const AuthContext = createContext<AuthContextType | undefined>(undefined);
+
+export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [user, setUser] = useState<UserProfile | null>(null);
+  const [elderlyProfile, setElderlyProfile] = useState<ElderlyProfile | null>(null);
+  const [members, setMembers] = useState<ProfileMember[]>([]);
+  const [pendingInvitations, setPendingInvitations] = useState<ProfileInvitation[]>([]);
+  const [medications, setMedications] = useState<Medication[]>([]);
+  const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [notifications, setNotifications] = useState<DbNotification[]>([]);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // Load session on startup
+  useEffect(() => {
+    async function loadInitialSession() {
+      setIsLoading(true);
+      try {
+        const sessionUser = await authService.getActiveSession();
+        if (sessionUser) {
+          setUser(sessionUser);
+          await loadHealthcareData(sessionUser);
+        }
+      } catch (err: any) {
+        console.error('Session load error:', err);
+      } finally {
+        setIsLoading(false);
+      }
+    }
+    loadInitialSession();
+  }, []);
+
+  async function loadHealthcareData(currentUser: UserProfile) {
+    try {
+      const ep = await authService.getElderlyProfile(currentUser.id, currentUser.role);
+      setElderlyProfile(ep);
+
+      if (ep) {
+        // 1. Fetch Care Circle Members
+        const mems = await authService.getProfileMembers(ep.id, currentUser.id);
+        setMembers(mems);
+
+        // 2. Fetch Pending Invitations (Profile Owner only)
+        if (currentUser.role === 'elderly' && ep.owner_id === currentUser.id) {
+          const invites = await authService.getPendingInvitations(ep.id, currentUser.id);
+          setPendingInvitations(invites);
+        } else {
+          setPendingInvitations([]);
+        }
+
+        // 3. Fetch Medications from Database
+        const medsRes = await dbService.getMedications(ep.id, currentUser.id);
+        if (medsRes.data) {
+          setMedications(medsRes.data);
+        }
+
+        // 4. Fetch Doctor Appointments from Database
+        const aptsRes = await dbService.getAppointments(ep.id, currentUser.id);
+        if (aptsRes.data) {
+          setAppointments(aptsRes.data);
+        }
+
+        // 5. Fetch Notifications from Database
+        const notifsRes = await dbService.getNotifications(ep.id, currentUser.id);
+        if (notifsRes.data) {
+          setNotifications(notifsRes.data);
+        }
+      } else {
+        setMembers([]);
+        setPendingInvitations([]);
+        setMedications([]);
+        setAppointments([]);
+        setNotifications([]);
+      }
+    } catch (err) {
+      console.error('Error loading healthcare profile details from database:', err);
+    }
+  }
+
+  const refreshProfileData = async () => {
+    if (user) {
+      await loadHealthcareData(user);
+    }
+  };
+
+  const signIn = async (email: string, password: string) => {
+    setError(null);
+    setIsLoading(true);
+    const result = await authService.signIn(email, password);
+    setIsLoading(false);
+
+    if (result.error || !result.user) {
+      setError(result.error || 'Login failed');
+      return { success: false, error: result.error };
+    }
+
+    setUser(result.user);
+    await loadHealthcareData(result.user);
+    return { success: true };
+  };
+
+  const signUp = async (params: {
+    email: string;
+    password: string;
+    fullName: string;
+    role: UserRole;
+    phone?: string;
+  }) => {
+    setError(null);
+    setIsLoading(true);
+    const result = await authService.signUp(params);
+    setIsLoading(false);
+
+    if (result.error || !result.user) {
+      setError(result.error || 'Registration failed');
+      return { success: false, error: result.error };
+    }
+
+    setUser(result.user);
+    await loadHealthcareData(result.user);
+    return { success: true };
+  };
+
+  const signInWithPasscode = async (passcode: string) => {
+    setError(null);
+    setIsLoading(true);
+    const result = await authService.signInWithPasscode(passcode);
+    setIsLoading(false);
+
+    if (result.error || !result.user) {
+      setError(result.error || 'Passcode authentication failed');
+      return { success: false, error: result.error };
+    }
+
+    setUser(result.user);
+    setElderlyProfile(result.elderlyProfile);
+    await loadHealthcareData(result.user);
+    return { success: true };
+  };
+
+  const signOut = async () => {
+    await authService.signOut();
+    setUser(null);
+    setElderlyProfile(null);
+    setMembers([]);
+    setPendingInvitations([]);
+    setMedications([]);
+    setAppointments([]);
+    setNotifications([]);
+    setError(null);
+  };
+
+  const createElderlyProfile = async (params: {
+    fullName: string;
+    dateOfBirth?: string;
+    passcode: string;
+    emergencyContactName: string;
+    emergencyContactPhone: string;
+    emergencyContactRelation: string;
+  }) => {
+    if (!user) return { success: false, error: 'User must be authenticated' };
+
+    setIsLoading(true);
+    const result = await authService.createElderlyProfile({
+      ownerId: user.id,
+      ...params,
+    });
+    setIsLoading(false);
+
+    if (result.error || !result.profile) {
+      return { success: false, error: result.error };
+    }
+
+    setElderlyProfile(result.profile);
+    await refreshProfileData();
+    return { success: true };
+  };
+
+  const inviteMember = async (email: string, role: ProfileMemberRole, permissions?: string[]) => {
+    if (!user || !elderlyProfile) {
+      return { invitation: null, error: 'No active profile found' };
+    }
+
+    // Enforce owner permission
+    if (user.role !== 'elderly' || elderlyProfile.owner_id !== user.id) {
+      return { invitation: null, error: 'Unauthorized: Only the elderly profile owner can issue invitations.' };
+    }
+
+    const result = await authService.createInvitation({
+      elderlyProfileId: elderlyProfile.id,
+      invitedBy: user.id,
+      invitedEmail: email,
+      role,
+      permissions,
+    });
+
+    if (result.invitation) {
+      setPendingInvitations(prev => [result.invitation, ...prev]);
+    }
+
+    return result;
+  };
+
+  const acceptInvitation = async (inviteCode: string) => {
+    if (!user) return { success: false, error: 'Please sign in first to redeem an invitation code.' };
+
+    setIsLoading(true);
+    const result = await authService.acceptInvitation(inviteCode, user);
+    setIsLoading(false);
+
+    if (!result.success) {
+      return result;
+    }
+
+    await loadHealthcareData(user);
+    return { success: true };
+  };
+
+  const revokeMember = async (memberId: string) => {
+    if (!user || !elderlyProfile) return { success: false, error: 'No active profile' };
+
+    const result = await authService.revokeMember(memberId, user.id, elderlyProfile);
+    if (result.success) {
+      setMembers(prev => prev.map(m => m.id === memberId ? { ...m, status: 'revoked' } : m));
+    }
+    return result;
+  };
+
+  // --------------------------------------------------------------------------
+  // HEALTHCARE DATA OPERATIONS
+  // --------------------------------------------------------------------------
+
+  const markMedicationTaken = async (id: string) => {
+    if (!elderlyProfile) return { success: false, error: 'No active profile' };
+
+    const res = await dbService.logMedicationDose({
+      medicationId: id,
+      elderlyProfileId: elderlyProfile.id,
+      status: 'taken',
+      loggedBy: user?.id,
+    }, user?.id);
+
+    if (res.success) {
+      setMedications(prev =>
+        prev.map(med =>
+          med.id === id ? { ...med, status: 'taken' as const, remainingCount: Math.max(0, med.remainingCount - 1) } : med
+        )
+      );
+    }
+    return res;
+  };
+
+  const addMedication = async (med: Omit<Medication, 'id'>) => {
+    if (!elderlyProfile) return { success: false, error: 'No active profile' };
+
+    const res = await dbService.createMedication({
+      elderlyProfileId: elderlyProfile.id,
+      name: med.name,
+      dosage: med.dosage,
+      purpose: med.purpose,
+      instructions: med.instructions,
+      prescribingDoctor: med.prescribingDoctor,
+      pillColor: med.pillColor,
+      remainingCount: med.remainingCount,
+      scheduleTime: med.scheduleTime,
+      timeOfDay: med.timeOfDay,
+    }, user?.id);
+
+    if (res.data) {
+      setMedications(prev => [res.data!, ...prev]);
+      return { success: true };
+    }
+    return { success: false, error: res.error };
+  };
+
+  const addAppointment = async (apt: Omit<Appointment, 'id'>) => {
+    if (!elderlyProfile) return { success: false, error: 'No active profile' };
+
+    const res = await dbService.createAppointment({
+      elderlyProfileId: elderlyProfile.id,
+      title: apt.title,
+      doctorName: apt.doctorName,
+      specialty: apt.specialty,
+      clinicName: apt.clinicName,
+      address: apt.address,
+      appointmentDate: apt.date,
+      appointmentTime: apt.time,
+      appointmentType: apt.type,
+      transportArranged: apt.transportArranged,
+      notes: apt.notes,
+      createdBy: user?.id,
+    }, user?.id);
+
+    if (res.data) {
+      setAppointments(prev => [res.data!, ...prev]);
+      return { success: true };
+    }
+    return { success: false, error: res.error };
+  };
+
+  const markNotificationAsRead = async (id: string) => {
+    await dbService.markNotificationAsRead(id);
+    setNotifications(prev => prev.map(n => n.id === id ? { ...n, is_read: true } : n));
+  };
+
+  // Permissions logic
+  const isOwner = user?.role === 'elderly';
+  const isCaretaker = user?.role === 'caretaker';
+  const isFamilyMember = user?.role === 'family_member';
+
+  const canManageMembers = isOwner;
+  const canRevokeMember = isOwner;
+  const canManageActivities = isOwner || isCaretaker;
+  const canViewHealth = Boolean(user && elderlyProfile);
+
+  return (
+    <AuthContext.Provider
+      value={{
+        user,
+        elderlyProfile,
+        role: user?.role || null,
+        members,
+        pendingInvitations,
+        medications,
+        appointments,
+        notifications,
+        isLoading,
+        error,
+        signIn,
+        signUp,
+        signInWithPasscode,
+        signOut,
+        createElderlyProfile,
+        inviteMember,
+        acceptInvitation,
+        revokeMember,
+        refreshProfileData,
+        markMedicationTaken,
+        addMedication,
+        addAppointment,
+        markNotificationAsRead,
+        isOwner,
+        isCaretaker,
+        isFamilyMember,
+        canManageMembers,
+        canManageActivities,
+        canViewHealth,
+        canRevokeMember,
+      }}
+    >
+      {children}
+    </AuthContext.Provider>
+  );
+};
+
+export const useAuth = () => {
+  const context = useContext(AuthContext);
+  if (!context) {
+    throw new Error('useAuth must be used within an AuthProvider');
+  }
+  return context;
+};
