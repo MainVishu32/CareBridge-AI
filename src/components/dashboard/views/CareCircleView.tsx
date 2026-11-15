@@ -31,7 +31,9 @@ export const CareCircleView: React.FC = () => {
     canManageMembers, 
     canRevokeMember, 
     inviteMember, 
-    revokeMember 
+    revokeMember,
+    isLoading,
+    error: profileDataError,
   } = useAuth();
 
   const [showInviteModal, setShowInviteModal] = useState(false);
@@ -59,14 +61,18 @@ export const CareCircleView: React.FC = () => {
     }
 
     setIsSubmitting(true);
-    const res = await inviteMember(inviteEmail.trim(), inviteRole);
-    setIsSubmitting(false);
-
-    if (res.error || !res.invitation) {
-      setActionError(res.error || 'Failed to create invitation.');
-    } else {
-      setCreatedInvite(res.invitation);
-      setActionSuccess(`Invitation generated successfully for ${inviteEmail.trim()}`);
+    try {
+      const res = await inviteMember(inviteEmail.trim(), inviteRole);
+      if (res.error || !res.invitation) {
+        setActionError(res.error || 'Failed to create invitation.');
+      } else {
+        setCreatedInvite(res.invitation);
+        setActionSuccess(`Invitation generated successfully for ${inviteEmail.trim()}`);
+      }
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Failed to create invitation.');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -87,22 +93,29 @@ export const CareCircleView: React.FC = () => {
     setIsRevoking(true);
     setActionError(null);
     setActionSuccess(null);
-
-    const res = await revokeMember(memberToRevoke.id);
-    setIsRevoking(false);
-
-    if (res.success) {
-      setActionSuccess(`Access revoked for ${memberToRevoke.member_name || memberToRevoke.member_email}. Their profile permissions have been invalidated.`);
-      setMemberToRevoke(null);
-    } else {
-      setActionError(res.error || 'Failed to revoke member access.');
+    try {
+      const res = await revokeMember(memberToRevoke.id);
+      if (res.success) {
+        setActionSuccess(`Access revoked for ${memberToRevoke.member_name || memberToRevoke.member_email}. Their profile permissions have been invalidated.`);
+        setMemberToRevoke(null);
+      } else {
+        setActionError(res.error || 'Failed to revoke member access.');
+      }
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Failed to revoke member access.');
+    } finally {
+      setIsRevoking(false);
     }
   };
 
-  const handleCopyCode = (code: string) => {
-    navigator.clipboard.writeText(code);
-    setCopiedCode(code);
-    setTimeout(() => setCopiedCode(null), 2500);
+  const handleCopyCode = async (code: string) => {
+    try {
+      await navigator.clipboard.writeText(code);
+      setCopiedCode(code);
+      setTimeout(() => setCopiedCode(null), 2500);
+    } catch {
+      setActionError('Unable to copy the invitation code. Select and copy it manually.');
+    }
   };
 
   const activeMembers = members.filter(m => m.status === 'active');
@@ -167,6 +180,13 @@ export const CareCircleView: React.FC = () => {
         </div>
       )}
 
+      {profileDataError && (
+        <div role="alert" className="p-4 rounded-2xl bg-red-50 border border-red-200 text-sm text-red-700 flex items-center gap-2">
+          <AlertCircle className="w-4 h-4 shrink-0" />
+          <span>{profileDataError}</span>
+        </div>
+      )}
+
       {/* Permissions and Role Overview Banner */}
       <div className="p-5 rounded-2xl bg-white border border-slate-200 shadow-2xs space-y-3">
         <div className="flex items-center justify-between flex-wrap gap-2">
@@ -194,12 +214,12 @@ export const CareCircleView: React.FC = () => {
         </div>
       </div>
 
-      {/* PENDING INVITATIONS (Only visible to Profile Owner) */}
+      {/* INVITATIONS (Only visible to Profile Owner) */}
       {isOwner && pendingInvitations.length > 0 && (
         <div className="space-y-3">
           <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
             <Ticket className="w-5 h-5 text-brand-600" />
-            <span>Pending Secure Invitations ({pendingInvitations.length})</span>
+            <span>Invitations ({pendingInvitations.length})</span>
           </h3>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -211,25 +231,31 @@ export const CareCircleView: React.FC = () => {
                       Invited as {inv.role === 'caretaker' ? 'Caretaker' : 'Family Member'}
                     </span>
                     <p className="text-base font-bold text-slate-900 mt-0.5">{inv.invited_email}</p>
-                    <p className="text-xs text-slate-500 mt-0.5">Expires in 7 days</p>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      {inv.status === 'expired' ? 'Expired' : 'Expires'} {new Date(inv.expires_at).toLocaleString()}
+                    </p>
                   </div>
-                  <Badge variant="amber" size="sm">Pending</Badge>
+                  <Badge variant={inv.status === 'expired' ? 'red' : 'amber'} size="sm">
+                    {inv.status === 'expired' ? 'Expired' : 'Pending'}
+                  </Badge>
                 </div>
 
-                <div className="flex items-center justify-between p-2.5 bg-white rounded-xl border border-amber-200">
-                  <div>
-                    <span className="text-[10px] uppercase font-bold text-slate-400 block">Invite Code</span>
-                    <span className="text-base font-mono font-bold text-slate-900">{inv.invite_code}</span>
+                {inv.status === 'pending' && (
+                  <div className="flex items-center justify-between gap-2 p-2.5 bg-white rounded-xl border border-amber-200">
+                    <div className="min-w-0">
+                      <span className="text-[10px] uppercase font-bold text-slate-400 block">Invite Code</span>
+                      <span className="break-all text-sm font-mono font-bold text-slate-900">{inv.invite_code}</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => void handleCopyCode(inv.invite_code)}
+                      className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-800 text-xs font-bold transition-colors"
+                    >
+                      {copiedCode === inv.invite_code ? <Check className="w-3.5 h-3.5 text-sage-600" /> : <Copy className="w-3.5 h-3.5" />}
+                      <span>{copiedCode === inv.invite_code ? 'Copied!' : 'Copy Code'}</span>
+                    </button>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => handleCopyCode(inv.invite_code)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-800 text-xs font-bold transition-colors"
-                  >
-                    {copiedCode === inv.invite_code ? <Check className="w-3.5 h-3.5 text-sage-600" /> : <Copy className="w-3.5 h-3.5" />}
-                    <span>{copiedCode === inv.invite_code ? 'Copied!' : 'Copy Code'}</span>
-                  </button>
-                </div>
+                )}
               </div>
             ))}
           </div>
@@ -242,7 +268,11 @@ export const CareCircleView: React.FC = () => {
           Authorized Members Connected ({activeMembers.length})
         </h3>
 
-        {activeMembers.length === 0 ? (
+        {isLoading ? (
+          <div role="status" className="p-8 text-center bg-white rounded-2xl border border-slate-200 text-sm text-slate-500">
+            Loading care circle members...
+          </div>
+        ) : activeMembers.length === 0 ? (
           <div className="p-8 text-center bg-white rounded-2xl border border-slate-200">
             <UserPlus className="w-10 h-10 text-slate-300 mx-auto mb-2" />
             <p className="text-base font-bold text-slate-700">No authorized members yet</p>
@@ -448,10 +478,10 @@ export const CareCircleView: React.FC = () => {
               <div className="space-y-5">
                 <div className="p-4 rounded-2xl bg-sage-50 border border-sage-300 text-center space-y-3">
                   <span className="text-xs font-bold uppercase tracking-wider text-sage-800 block">
-                    Active Invitation Code (6-Character)
+                    Secure Invitation Code
                   </span>
-                  <div className="p-4 bg-white rounded-2xl border-2 border-sage-400 font-mono text-3xl font-extrabold text-slate-900 tracking-wider flex items-center justify-center gap-3">
-                    <span>{createdInvite.invite_code}</span>
+                  <div className="p-4 bg-white rounded-2xl border-2 border-sage-400 font-mono text-sm sm:text-lg font-extrabold text-slate-900 break-all">
+                    {createdInvite.invite_code}
                   </div>
                   <Button
                     variant="primary"
@@ -478,7 +508,7 @@ export const CareCircleView: React.FC = () => {
                   </div>
                   <div className="flex justify-between py-1">
                     <span className="text-slate-500">Validity:</span>
-                    <strong className="text-amber-700">7 Days (Auto-expires)</strong>
+                    <strong className="text-amber-700">{new Date(createdInvite.expires_at).toLocaleString()}</strong>
                   </div>
                 </div>
 
@@ -554,7 +584,7 @@ export const CareCircleView: React.FC = () => {
 
                 <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-600 space-y-1">
                   <span className="font-bold text-slate-800 block">How joining works:</span>
-                  <p>A unique 6-character code (e.g. <code>CARE-XXXXXX</code>) will be created. The recipient can redeem it when registering or directly from their dashboard.</p>
+                  <p>A unique, time-limited secure code will be created. The recipient must register or sign in with this email address to redeem it.</p>
                 </div>
 
                 <div className="pt-4 flex items-center justify-end gap-3 border-t border-slate-100">

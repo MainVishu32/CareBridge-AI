@@ -15,17 +15,33 @@ export const CreateElderlyProfileModal: React.FC<CreateElderlyProfileModalProps>
   onClose,
   onCompleted,
 }) => {
-  const { createElderlyProfile, user } = useAuth();
+  const { createElderlyProfile, user, elderlyProfile } = useAuth();
 
-  const [fullName, setFullName] = useState(user?.name || '');
-  const [dateOfBirth, setDateOfBirth] = useState('');
+  const [fullName, setFullName] = useState(elderlyProfile?.full_name || user?.name || '');
+  const [dateOfBirth, setDateOfBirth] = useState(elderlyProfile?.date_of_birth || '');
   const [passcode, setPasscode] = useState('');
-  const [emergencyContactName, setEmergencyContactName] = useState('');
-  const [emergencyContactPhone, setEmergencyContactPhone] = useState('');
-  const [emergencyContactRelation, setEmergencyContactRelation] = useState('');
+  const [emergencyContactName, setEmergencyContactName] = useState(elderlyProfile?.emergency_contact_name || '');
+  const [emergencyContactPhone, setEmergencyContactPhone] = useState(elderlyProfile?.emergency_contact_phone || '');
+  const [emergencyContactRelation, setEmergencyContactRelation] = useState(elderlyProfile?.emergency_contact_relation || '');
   
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  React.useEffect(() => {
+    if (isOpen) {
+      if (elderlyProfile) {
+        setFullName(elderlyProfile.full_name || user?.name || '');
+        setDateOfBirth(elderlyProfile.date_of_birth || '');
+        setEmergencyContactName(elderlyProfile.emergency_contact_name || '');
+        setEmergencyContactPhone(elderlyProfile.emergency_contact_phone || '');
+        setEmergencyContactRelation(elderlyProfile.emergency_contact_relation || '');
+      } else if (user) {
+        setFullName(user.name || '');
+      }
+      setPasscode('');
+      setError(null);
+    }
+  }, [isOpen, elderlyProfile, user]);
 
   if (!isOpen) return null;
 

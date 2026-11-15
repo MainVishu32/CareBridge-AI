@@ -43,7 +43,7 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
   onAddAppointment,
   onUpdateEmergencyContact,
 }) => {
-  const { user, elderlyProfile, signOut, acceptInvitation, isOwner, isCaretaker, isFamilyMember } = useAuth();
+  const { user, elderlyProfile, signOut, acceptInvitation, isOwner, isCaretaker, isFamilyMember, error: authError } = useAuth();
 
   const [currentTab, setCurrentTab] = useState<NavigationTab>('overview');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -52,6 +52,7 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
   // Invite code input state for caretakers/family members without profile
   const [inviteCodeInput, setInviteCodeInput] = useState('');
   const [inviteError, setInviteError] = useState<string | null>(null);
+  const [inviteSuccess, setInviteSuccess] = useState<string | null>(null);
   const [isRedeeming, setIsRedeeming] = useState(false);
 
   const pendingMedsCount = medications.filter(m => m.status === 'pending').length;
@@ -62,14 +63,20 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
     if (!inviteCodeInput.trim()) return;
 
     setInviteError(null);
+    setInviteSuccess(null);
     setIsRedeeming(true);
-    const res = await acceptInvitation(inviteCodeInput.trim());
-    setIsRedeeming(false);
-
-    if (!res.success) {
-      setInviteError(res.error || 'Failed to accept invitation.');
-    } else {
-      setInviteCodeInput('');
+    try {
+      const res = await acceptInvitation(inviteCodeInput.trim());
+      if (!res.success) {
+        setInviteError(res.error || 'Failed to accept invitation.');
+      } else {
+        setInviteCodeInput('');
+        setInviteSuccess('Invitation accepted. You are now connected to the care profile.');
+      }
+    } catch (error) {
+      setInviteError(error instanceof Error ? error.message : 'Failed to accept invitation.');
+    } finally {
+      setIsRedeeming(false);
     }
   };
 
@@ -109,9 +116,16 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
 
         {/* Main Content Viewport */}
         <main className="flex-1 p-4 sm:p-6 lg:p-8 overflow-y-auto">
+
+          {authError && (
+            <div role="alert" className="mb-5 p-3.5 rounded-xl bg-red-50 border border-red-200 text-sm text-red-700 flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              <span>{authError}</span>
+            </div>
+          )}
           
           {/* PROFILE SETUP PROMPT: For Elderly Owners who haven't set up profile */}
-          {isOwner && !elderlyProfile && (
+          {isOwner && (!elderlyProfile || !elderlyProfile.emergency_contact_name) && (
             <div className="mb-6 p-6 rounded-3xl bg-brand-50 border-2 border-brand-200 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-xs">
               <div className="flex items-center gap-4">
                 <div className="p-3.5 rounded-2xl bg-brand-600 text-white shrink-0">
@@ -158,10 +172,17 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
                 </div>
               )}
 
+              {inviteSuccess && (
+                <div role="status" className="p-3.5 rounded-xl bg-sage-50 border border-sage-200 text-sm text-sage-800 flex items-center gap-2">
+                  <ShieldCheck className="w-4 h-4 shrink-0" />
+                  <span>{inviteSuccess}</span>
+                </div>
+              )}
+
               <form onSubmit={handleRedeemInvite} className="flex flex-col sm:flex-row gap-3">
                 <div className="flex-1">
                   <Input
-                    placeholder="e.g. CARE-NW89K2"
+                    placeholder="Paste the code from the profile owner"
                     value={inviteCodeInput}
                     onChange={(e) => setInviteCodeInput(e.target.value.toUpperCase())}
                   />

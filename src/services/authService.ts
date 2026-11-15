@@ -1,5 +1,5 @@
 import { supabase, isSupabaseConfigured } from '../lib/supabaseClient';
-import { hashPasscode, generateInvitationCode } from '../lib/cryptoUtils';
+import { hashPasscode } from '../lib/cryptoUtils';
 import { 
   UserProfile, 
   ElderlyProfile, 
@@ -13,93 +13,6 @@ import {
 const STORAGE_SESSION_KEY = 'carebridge_auth_session';
 const STORAGE_PROFILES_KEY = 'carebridge_db_profiles';
 const STORAGE_ELDERLY_PROFILES_KEY = 'carebridge_db_elderly_profiles';
-const STORAGE_MEMBERS_KEY = 'carebridge_db_members';
-const STORAGE_INVITATIONS_KEY = 'carebridge_db_invitations';
-
-// Seed initial demonstration healthcare profile if empty
-function initializeLocalStorageDB() {
-  if (typeof window === 'undefined') return;
-
-  // Initialize or synchronize default elderly healthcare profile
-  const storedElderly = localStorage.getItem(STORAGE_ELDERLY_PROFILES_KEY);
-  if (!storedElderly) {
-    const initialElderly: ElderlyProfile = {
-      id: 'elderly-p-101',
-      owner_id: 'usr-elderly-1',
-      full_name: 'Eleanor Vance',
-      date_of_birth: '1944-05-12',
-      passcode_hash: '5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8', // hashed "1234"
-      emergency_contact_name: 'David Vance (Son)',
-      emergency_contact_phone: '+1 (555) 234-8901',
-      emergency_contact_relation: 'Son & Legal Proxy',
-      created_at: new Date().toISOString(),
-    };
-    localStorage.setItem(STORAGE_ELDERLY_PROFILES_KEY, JSON.stringify([initialElderly]));
-  } else {
-    // Migration check: ensure demo profile owner_id is usr-elderly-1
-    try {
-      const profiles: ElderlyProfile[] = JSON.parse(storedElderly);
-      if (profiles.length > 0 && (profiles[0].owner_id === 'usr-101' || !profiles[0].owner_id)) {
-        profiles[0].owner_id = 'usr-elderly-1';
-        localStorage.setItem(STORAGE_ELDERLY_PROFILES_KEY, JSON.stringify(profiles));
-      }
-    } catch {
-      // ignore
-    }
-  }
-
-  if (!localStorage.getItem(STORAGE_MEMBERS_KEY)) {
-    const initialMembers: ProfileMember[] = [
-      {
-        id: 'mem-1',
-        elderly_profile_id: 'elderly-p-101',
-        user_id: 'usr-family-1',
-        role: 'family_member',
-        status: 'active',
-        permissions: ['view_health', 'view_reports', 'emergency_contact'],
-        invited_at: '2026-11-01T10:00:00Z',
-        accepted_at: '2026-11-01T10:30:00Z',
-        member_name: 'David Vance',
-        member_email: 'david.vance@example.com',
-        member_phone: '+1 (555) 234-8901',
-      },
-      {
-        id: 'mem-2',
-        elderly_profile_id: 'elderly-p-101',
-        user_id: 'usr-caretaker-1',
-        role: 'caretaker',
-        status: 'active',
-        permissions: ['view_health', 'manage_activities', 'view_reports', 'log_notes'],
-        invited_at: '2026-11-05T08:00:00Z',
-        accepted_at: '2026-11-05T08:15:00Z',
-        member_name: 'Maria Rodriguez, CNA',
-        member_email: 'm.rodriguez@comfortcare.org',
-        member_phone: '+1 (555) 876-4321',
-      },
-    ];
-    localStorage.setItem(STORAGE_MEMBERS_KEY, JSON.stringify(initialMembers));
-  }
-
-  if (!localStorage.getItem(STORAGE_INVITATIONS_KEY)) {
-    const initialInvites: ProfileInvitation[] = [
-      {
-        id: 'inv-1',
-        elderly_profile_id: 'elderly-p-101',
-        invited_by: 'usr-elderly-1',
-        invited_email: 'nurse.sarah@carebridge.health',
-        role: 'caretaker',
-        invite_code: 'CARE-NW89K2',
-        status: 'pending',
-        permissions: ['view_health', 'manage_activities'],
-        created_at: new Date().toISOString(),
-        expires_at: new Date(Date.now() + 7 * 86400000).toISOString(),
-      }
-    ];
-    localStorage.setItem(STORAGE_INVITATIONS_KEY, JSON.stringify(initialInvites));
-  }
-}
-
-initializeLocalStorageDB();
 
 // ==============================================================================
 // AUTHENTICATION & ROLE MANAGEMENT API
@@ -116,7 +29,7 @@ export const authService = {
     fullName: string;
     role: UserRole;
     phone?: string;
-  }): Promise<{ user: UserProfile; error?: string }> {
+  }): Promise<{ user: UserProfile; error?: string; needsEmailConfirmation?: boolean }> {
     const { email, password, fullName, role, phone } = params;
 
     if (isSupabaseConfigured && supabase) {
@@ -136,9 +49,13 @@ export const authService = {
         return { user: null as any, error: error.message };
       }
 
+      if (data.user && !data.session) {
+        return { user: null as any, needsEmailConfirmation: true };
+      }
+
       if (data.user) {
         // Upsert into public.profiles
-        await supabase.from('profiles').upsert({
+        const { error: profileError } = await supabase.from('profiles').upsert({
           id: data.user.id,
           email,
           full_name: fullName,
@@ -146,17 +63,23 @@ export const authService = {
           phone: phone || '',
           updated_at: new Date().toISOString(),
         });
+        if (profileError) {
+          return { user: null as any, error: profileError.message };
+        }
 
         // If registered as Elderly Individual, provision their elderly_profiles record immediately
         if (role === 'elderly') {
-          await supabase.from('elderly_profiles').upsert({
+          const { error: careProfileError } = await supabase.from('care_profiles').upsert({
             owner_id: data.user.id,
             full_name: fullName,
-            emergency_contact_name: 'Family Emergency Proxy',
-            emergency_contact_phone: phone || '+1 (555) 000-0000',
-            emergency_contact_relation: 'Primary Emergency Contact',
+            emergency_contact_name: null,
+            emergency_contact_phone: phone || null,
+            emergency_contact_relation: null,
             updated_at: new Date().toISOString(),
           }, { onConflict: 'owner_id' });
+          if (careProfileError) {
+            return { user: null as any, error: careProfileError.message };
+          }
         }
 
         const userProfile: UserProfile = {
@@ -198,9 +121,9 @@ export const authService = {
         id: `elderly-p-${newUserId}`,
         owner_id: newUserId,
         full_name: fullName,
-        emergency_contact_name: 'Family Emergency Proxy',
-        emergency_contact_phone: phone || '+1 (555) 000-0000',
-        emergency_contact_relation: 'Primary Emergency Contact',
+        emergency_contact_name: undefined,
+        emergency_contact_phone: phone || undefined,
+        emergency_contact_relation: undefined,
         created_at: new Date().toISOString(),
       };
       elderlyProfiles.push(newElderlyProfile);
@@ -299,13 +222,13 @@ export const authService = {
 
   /**
    * Fast Passcode Authentication for Elderly Profile
-   * Verifies against salted cryptographic hash
+   * Verifies against salted cryptographic hash server-side
    */
   async signInWithPasscode(passcode: string): Promise<{ user: UserProfile; elderlyProfile: ElderlyProfile; error?: string }> {
     if (isSupabaseConfigured && supabase) {
       const { data: elderlyProfiles } = await supabase
-        .from('elderly_profiles')
-        .select('*')
+        .from('care_profiles')
+        .select('id, owner_id, full_name, date_of_birth, emergency_contact_name, emergency_contact_phone, emergency_contact_relation, created_at, updated_at')
         .limit(1);
 
       if (elderlyProfiles && elderlyProfiles.length > 0) {
@@ -336,7 +259,7 @@ export const authService = {
 
     const targetProfile = elderlyProfiles[0];
     const { hash } = await hashPasscode(passcode, 'CareBridgeFixedSalt');
-    const isValid = targetProfile.passcode_hash === hash || passcode.length === 4;
+    const isValid = Boolean(targetProfile.passcode_hash && targetProfile.passcode_hash === hash);
 
     if (!isValid) {
       return { user: null as any, elderlyProfile: null as any, error: 'Incorrect 4-digit passcode. Please try again.' };
@@ -347,11 +270,11 @@ export const authService = {
       name: targetProfile.full_name,
       email: `${targetProfile.full_name.toLowerCase().replace(/\s+/g, '.')}@carebridge.health`,
       role: 'elderly',
-      emergencyContact: {
+      emergencyContact: targetProfile.emergency_contact_name ? {
         name: targetProfile.emergency_contact_name,
-        relationship: targetProfile.emergency_contact_relation,
-        phone: targetProfile.emergency_contact_phone,
-      },
+        relationship: targetProfile.emergency_contact_relation || 'Emergency Contact',
+        phone: targetProfile.emergency_contact_phone || '',
+      } : undefined,
     };
 
     localStorage.setItem(STORAGE_SESSION_KEY, JSON.stringify(userProfile));
@@ -396,8 +319,9 @@ export const authService = {
   // ============================================================================
 
   /**
-   * Create an Elderly Healthcare Profile
-   * Hashes passcode cryptographically before saving
+   * Create or Update an Elderly Healthcare Profile
+   * Writes directly to care_profiles table and hashes passcode server-side via RPC.
+   * Never stores plaintext passcode or returns passcode_hash to client.
    */
   async createElderlyProfile(params: {
     ownerId: string;
@@ -409,31 +333,60 @@ export const authService = {
     emergencyContactRelation: string;
   }): Promise<{ profile: ElderlyProfile; error?: string }> {
     const { ownerId, fullName, dateOfBirth, passcode, emergencyContactName, emergencyContactPhone, emergencyContactRelation } = params;
-    const { hash } = await hashPasscode(passcode, 'CareBridgeFixedSalt');
 
     if (isSupabaseConfigured && supabase) {
-      const { data, error } = await supabase
-        .from('elderly_profiles')
+      // The cached CareBridge user (including passcode login) is application state,
+      // not a Supabase Auth identity. Only a real JWT session can satisfy RLS.
+      const { data: { user: authUser }, error: authError } = await supabase.auth.getUser();
+      if (authError || !authUser) {
+        return { profile: null as any, error: 'A Supabase account session is required to create or update a care profile. Sign in with your account first.' };
+      }
+      if (ownerId !== authUser.id) {
+        return { profile: null as any, error: 'The active Supabase account does not own this care profile.' };
+      }
+
+      // 1. Write profile records to the actual care_profiles table (never the elderly_profiles view)
+      const { data: profileRecord, error: profileError } = await supabase
+        .from('care_profiles')
         .upsert({
-          owner_id: ownerId,
+          owner_id: authUser.id,
           full_name: fullName,
           date_of_birth: dateOfBirth || null,
-          passcode_hash: hash,
           emergency_contact_name: emergencyContactName,
           emergency_contact_phone: emergencyContactPhone,
           emergency_contact_relation: emergencyContactRelation,
           updated_at: new Date().toISOString(),
         }, { onConflict: 'owner_id' })
-        .select()
+        .select('id, owner_id, full_name, date_of_birth, emergency_contact_name, emergency_contact_phone, emergency_contact_relation, created_at, updated_at')
         .single();
 
-      if (error) {
-        return { profile: null as any, error: error.message };
+      if (profileError) {
+        return { profile: null as any, error: profileError.message };
       }
-      return { profile: data };
+
+      // 2. Hash and store the 4-digit passcode securely server-side via set_care_passcode RPC
+      if (passcode) {
+        const { error: passcodeError } = await supabase.rpc('set_care_passcode', {
+          p_profile_id: profileRecord.id,
+          p_passcode: passcode,
+        });
+
+        if (passcodeError) {
+          return { profile: null as any, error: `Profile created, but failed to set passcode: ${passcodeError.message}` };
+        }
+      }
+
+      // Return clean profile without exposing passcode_hash to frontend
+      const safeProfile: ElderlyProfile = {
+        ...profileRecord,
+      };
+      delete (safeProfile as any).passcode_hash;
+
+      return { profile: safeProfile };
     }
 
-    // Local DB
+    // Local DB (offline fallback)
+    const { hash } = await hashPasscode(passcode, 'CareBridgeFixedSalt');
     const elderlyProfiles: ElderlyProfile[] = JSON.parse(localStorage.getItem(STORAGE_ELDERLY_PROFILES_KEY) || '[]');
     const existingIndex = elderlyProfiles.findIndex(p => p.owner_id === ownerId);
 
@@ -442,7 +395,6 @@ export const authService = {
       owner_id: ownerId,
       full_name: fullName,
       date_of_birth: dateOfBirth,
-      passcode_hash: hash,
       emergency_contact_name: emergencyContactName,
       emergency_contact_phone: emergencyContactPhone,
       emergency_contact_relation: emergencyContactRelation,
@@ -451,12 +403,13 @@ export const authService = {
     };
 
     if (existingIndex >= 0) {
-      elderlyProfiles[existingIndex] = profileData;
+      elderlyProfiles[existingIndex] = { ...profileData, passcode_hash: hash };
     } else {
-      elderlyProfiles.push(profileData);
+      elderlyProfiles.push({ ...profileData, passcode_hash: hash });
     }
     localStorage.setItem(STORAGE_ELDERLY_PROFILES_KEY, JSON.stringify(elderlyProfiles));
 
+    // Guarantee passcode_hash is not returned in client response
     return { profile: profileData };
   },
 
@@ -469,8 +422,8 @@ export const authService = {
     if (isSupabaseConfigured && supabase) {
       if (role === 'elderly') {
         const { data } = await supabase
-          .from('elderly_profiles')
-          .select('*')
+          .from('care_profiles')
+          .select('id, owner_id, full_name, date_of_birth, emergency_contact_name, emergency_contact_phone, emergency_contact_relation, created_at, updated_at')
           .eq('owner_id', userId)
           .maybeSingle();
 
@@ -478,15 +431,15 @@ export const authService = {
 
         // If not found, provision one for this elderly owner
         const { data: newProfile } = await supabase
-          .from('elderly_profiles')
+          .from('care_profiles')
           .insert({
             owner_id: userId,
             full_name: 'My Healthcare Profile',
-            emergency_contact_name: 'Primary Emergency Proxy',
-            emergency_contact_phone: '+1 (555) 000-0000',
-            emergency_contact_relation: 'Emergency Proxy',
+            emergency_contact_name: null,
+            emergency_contact_phone: null,
+            emergency_contact_relation: null,
           })
-          .select()
+          .select('id, owner_id, full_name, date_of_birth, emergency_contact_name, emergency_contact_phone, emergency_contact_relation, created_at, updated_at')
           .single();
 
         return newProfile || null;
@@ -502,8 +455,8 @@ export const authService = {
 
         if (memberData?.elderly_profile_id) {
           const { data } = await supabase
-            .from('elderly_profiles')
-            .select('*')
+            .from('care_profiles')
+            .select('id, owner_id, full_name, date_of_birth, emergency_contact_name, emergency_contact_phone, emergency_contact_relation, created_at, updated_at')
             .eq('id', memberData.elderly_profile_id)
             .single();
           return data || null;
@@ -516,9 +469,15 @@ export const authService = {
     // Local fallback
     const profiles: ElderlyProfile[] = JSON.parse(localStorage.getItem(STORAGE_ELDERLY_PROFILES_KEY) || '[]');
     
+    const stripPasscodeHash = (p: ElderlyProfile): ElderlyProfile => {
+      const copy = { ...p };
+      delete (copy as any).passcode_hash;
+      return copy;
+    };
+
     if (role === 'elderly') {
       const found = profiles.find(p => p.owner_id === userId);
-      if (found) return found;
+      if (found) return stripPasscodeHash(found);
 
       // If this is the demo elderly user id ('usr-elderly-1' or 'usr-101')
       if (userId === 'usr-elderly-1' || userId === 'usr-101') {
@@ -526,7 +485,7 @@ export const authService = {
         if (demo) {
           demo.owner_id = userId; // ensure exact ownership match
           localStorage.setItem(STORAGE_ELDERLY_PROFILES_KEY, JSON.stringify(profiles));
-          return demo;
+          return stripPasscodeHash(demo);
         }
       }
 
@@ -535,70 +494,69 @@ export const authService = {
         id: `elderly-p-${userId}`,
         owner_id: userId,
         full_name: 'My Healthcare Profile',
-        emergency_contact_name: 'Family Emergency Proxy',
-        emergency_contact_phone: '+1 (555) 000-0000',
-        emergency_contact_relation: 'Primary Emergency Contact',
+        emergency_contact_name: null,
+        emergency_contact_phone: null,
+        emergency_contact_relation: null,
         created_at: new Date().toISOString(),
       };
       profiles.push(newProfile);
       localStorage.setItem(STORAGE_ELDERLY_PROFILES_KEY, JSON.stringify(profiles));
-      return newProfile;
+      return stripPasscodeHash(newProfile);
     } else {
-      // Caretaker or Family Member
-      const members: ProfileMember[] = JSON.parse(localStorage.getItem(STORAGE_MEMBERS_KEY) || '[]');
-      const activeMembership = members.find(m => m.user_id === userId && m.status === 'active');
-      if (activeMembership) {
-        return profiles.find(p => p.id === activeMembership.elderly_profile_id) || null;
-      }
-      // If revoked or unassociated, return null (strictly no access)
+      // Local mode has no trusted membership source; never infer profile access.
       return null;
     }
   },
 
   /**
    * Get all authorized members connected to the elderly profile
-   * Unauthorized requesters are blocked
+   * RLS limits the roster; member profile details are fetched through the
+   * separately protected profiles table.
    */
   async getProfileMembers(elderlyProfileId: string, currentUserId?: string): Promise<ProfileMember[]> {
-    if (isSupabaseConfigured && supabase) {
-      const { data } = await supabase
-        .from('profile_members')
-        .select(`
-          *,
-          profiles:user_id (full_name, email, phone)
-        `)
-        .eq('elderly_profile_id', elderlyProfileId);
-
-      if (data) {
-        return data.map((m: any) => ({
-          ...m,
-          member_name: m.profiles?.full_name || m.member_name,
-          member_email: m.profiles?.email || m.member_email,
-          member_phone: m.profiles?.phone || m.member_phone,
-        }));
-      }
+    if (!isSupabaseConfigured || !supabase) {
+      throw new Error('Care Circle requires a configured Supabase connection.');
     }
 
-    const members: ProfileMember[] = JSON.parse(localStorage.getItem(STORAGE_MEMBERS_KEY) || '[]');
-    
-    // If currentUserId provided, enforce membership/ownership check
-    if (currentUserId) {
-      const elderlyProfiles: ElderlyProfile[] = JSON.parse(localStorage.getItem(STORAGE_ELDERLY_PROFILES_KEY) || '[]');
-      const profile = elderlyProfiles.find(p => p.id === elderlyProfileId);
-      const isOwner = profile?.owner_id === currentUserId;
-      const isActiveMember = members.some(m => m.elderly_profile_id === elderlyProfileId && m.user_id === currentUserId && m.status === 'active');
-      if (!isOwner && !isActiveMember) {
-        throw new Error('Unauthorized: You do not have access to this healthcare profile roster.');
-      }
+    const { data: authData, error: authError } = await supabase.auth.getUser();
+    if (authError) throw authError;
+    if (!authData.user || (currentUserId && authData.user.id !== currentUserId)) {
+      throw new Error('Unauthorized: Sign in to view the care circle.');
     }
 
-    return members.filter(m => m.elderly_profile_id === elderlyProfileId);
+    const { data: memberRows, error: membersError } = await supabase
+      .from('profile_members')
+      .select('*')
+      .eq('elderly_profile_id', elderlyProfileId)
+      .order('invited_at', { ascending: false });
+
+    if (membersError) throw membersError;
+    if (!memberRows?.length) return [];
+
+    const userIds = [...new Set(memberRows.map(member => member.user_id))];
+    const { data: profiles, error: profilesError } = await supabase
+      .from('profiles')
+      .select('id, full_name, email, phone')
+      .in('id', userIds);
+
+    if (profilesError) throw profilesError;
+    const profileById = new Map((profiles || []).map(profile => [profile.id, profile]));
+
+    return memberRows.map(member => {
+      const profile = profileById.get(member.user_id);
+      return {
+        ...member,
+        permissions: Array.isArray(member.permissions) ? member.permissions : [],
+        member_name: profile?.full_name,
+        member_email: profile?.email,
+        member_phone: profile?.phone,
+      };
+    });
   },
 
   /**
    * Invite a new Caretaker or Family Member
-   * Enforces that ONLY the profile owner can issue invitations
-   * Generates a unique, secure 6-character code with 7-day expiration
+   * Invitation codes are generated server-side and only returned to the owner.
    */
   async createInvitation(params: {
     elderlyProfileId: string;
@@ -607,175 +565,113 @@ export const authService = {
     role: ProfileMemberRole;
     permissions?: string[];
   }): Promise<{ invitation: ProfileInvitation; error?: string }> {
-    const { elderlyProfileId, invitedBy, invitedEmail, role, permissions } = params;
+    const { elderlyProfileId, invitedBy, invitedEmail, role } = params;
 
-    // Backend authorization check: verify caller owns the profile
-    const elderlyProfiles: ElderlyProfile[] = JSON.parse(localStorage.getItem(STORAGE_ELDERLY_PROFILES_KEY) || '[]');
-    const targetProfile = elderlyProfiles.find(p => p.id === elderlyProfileId);
-    
-    if (targetProfile && targetProfile.owner_id !== invitedBy) {
-      return { invitation: null as any, error: 'Unauthorized: Only the elderly profile owner can issue invitations.' };
+    if (!isSupabaseConfigured || !supabase) {
+      return { invitation: null as any, error: 'Care Circle requires a configured Supabase connection.' };
     }
 
-    const inviteCode = generateInvitationCode();
-    const defaultPermissions = role === 'caretaker'
-      ? ['view_health', 'manage_activities', 'view_reports', 'log_notes']
-      : ['view_health', 'view_reports', 'emergency_contact'];
-
-    const newInvite: ProfileInvitation = {
-      id: `inv-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-      elderly_profile_id: elderlyProfileId,
-      invited_by: invitedBy,
-      invited_email: invitedEmail.toLowerCase().trim(),
-      role,
-      invite_code: inviteCode,
-      status: 'pending',
-      permissions: permissions || defaultPermissions,
-      created_at: new Date().toISOString(),
-      expires_at: new Date(Date.now() + 7 * 86400000).toISOString(), // 7 days expiry
-    };
-
-    if (isSupabaseConfigured && supabase) {
-      const { data, error } = await supabase
-        .from('profile_invitations')
-        .insert({
-          elderly_profile_id: elderlyProfileId,
-          invited_by: invitedBy,
-          invited_email: invitedEmail.toLowerCase().trim(),
-          role,
-          invite_code: inviteCode,
-          permissions: permissions || defaultPermissions,
-        })
-        .select()
-        .single();
-
-      if (error) {
-        return { invitation: null as any, error: error.message };
-      }
-      return { invitation: data };
+    const { data: authData, error: authError } = await supabase.auth.getUser();
+    if (authError) return { invitation: null as any, error: authError.message };
+    if (!authData.user || authData.user.id !== invitedBy) {
+      return { invitation: null as any, error: 'Unauthorized: Sign in as the profile owner to invite members.' };
     }
 
-    // Local DB persistence
-    const invitations: ProfileInvitation[] = JSON.parse(localStorage.getItem(STORAGE_INVITATIONS_KEY) || '[]');
-    invitations.push(newInvite);
-    localStorage.setItem(STORAGE_INVITATIONS_KEY, JSON.stringify(invitations));
+    const { data, error } = await supabase.rpc('create_profile_invitation', {
+      p_care_profile_id: elderlyProfileId,
+      p_invited_email: invitedEmail.trim().toLowerCase(),
+      p_role: role,
+    });
 
-    return { invitation: newInvite };
+    if (error) return { invitation: null as any, error: error.message };
+    return { invitation: data as ProfileInvitation };
+  },
+
+  async verifyInvitation(
+    inviteCode: string,
+    email: string,
+  ): Promise<{ role?: ProfileMemberRole; error?: string }> {
+    if (!isSupabaseConfigured || !supabase) {
+      return { error: 'Care Circle requires a configured Supabase connection.' };
+    }
+
+    const { data, error } = await supabase.rpc('verify_profile_invitation', {
+      p_invite_code: inviteCode.trim().toUpperCase(),
+      p_invited_email: email.trim().toLowerCase(),
+    });
+
+    if (error) return { error: error.message };
+    if (!data?.valid || !['caretaker', 'family_member'].includes(data.role)) {
+      return { error: 'The invitation code is invalid, expired, or was issued to a different email address.' };
+    }
+
+    return { role: data.role as ProfileMemberRole };
   },
 
   /**
-   * Get pending invitations for the elderly profile
+   * List owner-visible pending and expired invitations. RLS restricts access to
+   * profile owners; invited users redeem only through the email-checking RPC.
    */
   async getPendingInvitations(elderlyProfileId: string, currentUserId?: string): Promise<ProfileInvitation[]> {
-    if (isSupabaseConfigured && supabase) {
-      const { data } = await supabase
-        .from('profile_invitations')
-        .select('*')
-        .eq('elderly_profile_id', elderlyProfileId)
-        .eq('status', 'pending');
-      if (data) return data;
+    if (!isSupabaseConfigured || !supabase) {
+      throw new Error('Care Circle requires a configured Supabase connection.');
     }
 
-    const invitations: ProfileInvitation[] = JSON.parse(localStorage.getItem(STORAGE_INVITATIONS_KEY) || '[]');
-    
-    // Check owner authorization if requested
-    if (currentUserId) {
-      const elderlyProfiles: ElderlyProfile[] = JSON.parse(localStorage.getItem(STORAGE_ELDERLY_PROFILES_KEY) || '[]');
-      const profile = elderlyProfiles.find(p => p.id === elderlyProfileId);
-      if (profile && profile.owner_id !== currentUserId) {
-        return []; // non-owners cannot see invitations
-      }
+    const { data: authData, error: authError } = await supabase.auth.getUser();
+    if (authError) throw authError;
+    if (!authData.user || (currentUserId && authData.user.id !== currentUserId)) {
+      throw new Error('Unauthorized: Sign in as the profile owner to view invitations.');
     }
 
-    return invitations.filter(inv => 
-      inv.elderly_profile_id === elderlyProfileId && 
-      inv.status === 'pending' &&
-      new Date(inv.expires_at).getTime() > Date.now()
-    );
+    const { data, error } = await supabase
+      .from('profile_invitations')
+      .select('*')
+      .eq('elderly_profile_id', elderlyProfileId)
+      .in('status', ['pending', 'expired'])
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+
+    return (data || []).map(invitation => ({
+      ...invitation,
+      status: invitation.status === 'pending' && Date.parse(invitation.expires_at) <= Date.now()
+        ? 'expired'
+        : invitation.status,
+    }));
   },
 
   /**
-   * Accept an Invitation Code to join an elderly profile
-   * Validates code, checks expiration, prevents reuse, and updates membership
+   * Accept an invitation. The database atomically validates ownership,
+   * authenticated email, expiration, and one-time redemption.
    */
   async acceptInvitation(inviteCode: string, user: UserProfile): Promise<{ success: boolean; elderlyProfileId?: string; role?: ProfileMemberRole; error?: string }> {
     if (!user) {
       return { success: false, error: 'Authentication required. Please sign in before redeeming an invitation code.' };
     }
 
-    const cleanCode = inviteCode.trim().toUpperCase();
-
-    if (isSupabaseConfigured && supabase) {
-      const { data, error } = await supabase.rpc('accept_profile_invitation', {
-        p_invite_code: cleanCode,
-      });
-
-      if (error) {
-        return { success: false, error: error.message };
-      }
-      return { success: true, elderlyProfileId: data?.elderly_profile_id, role: data?.role };
+    if (!isSupabaseConfigured || !supabase) {
+      return { success: false, error: 'Care Circle requires a configured Supabase connection.' };
     }
 
-    // Local DB verification
-    const invitations: ProfileInvitation[] = JSON.parse(localStorage.getItem(STORAGE_INVITATIONS_KEY) || '[]');
-    const invite = invitations.find(inv => inv.invite_code === cleanCode);
-
-    if (!invite) {
-      return { success: false, error: 'Invalid invitation code. Please verify the 6-character code.' };
+    const { data: authData, error: authError } = await supabase.auth.getUser();
+    if (authError) return { success: false, error: authError.message };
+    if (!authData.user || authData.user.id !== user.id) {
+      return { success: false, error: 'Please sign in with the invited account before redeeming this code.' };
     }
 
-    if (invite.status === 'accepted') {
-      return { success: false, error: 'This invitation code has already been redeemed.' };
+    const { data, error } = await supabase.rpc('accept_profile_invitation', {
+      p_invite_code: inviteCode.trim().toUpperCase(),
+    });
+
+    if (error) return { success: false, error: error.message };
+    if (data?.role) {
+      localStorage.setItem(STORAGE_SESSION_KEY, JSON.stringify({ ...user, role: data.role }));
     }
-
-    if (invite.status === 'revoked') {
-      return { success: false, error: 'This invitation has been revoked by the profile owner.' };
-    }
-
-    // Check expiration timestamp
-    if (new Date(invite.expires_at).getTime() < Date.now()) {
-      invite.status = 'expired';
-      localStorage.setItem(STORAGE_INVITATIONS_KEY, JSON.stringify(invitations));
-      return { success: false, error: 'This invitation code has expired. Please ask the profile owner for a fresh code.' };
-    }
-
-    // Mark as accepted (cannot be reused)
-    invite.status = 'accepted';
-    localStorage.setItem(STORAGE_INVITATIONS_KEY, JSON.stringify(invitations));
-
-    // Add or reactivate in profile_members
-    const members: ProfileMember[] = JSON.parse(localStorage.getItem(STORAGE_MEMBERS_KEY) || '[]');
-    const existingIndex = members.findIndex(m => m.elderly_profile_id === invite.elderly_profile_id && m.user_id === user.id);
-
-    const memberEntry: ProfileMember = {
-      id: existingIndex >= 0 ? members[existingIndex].id : `mem-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-      elderly_profile_id: invite.elderly_profile_id,
-      user_id: user.id,
-      role: invite.role,
-      status: 'active',
-      permissions: invite.permissions,
-      invited_at: invite.created_at,
-      accepted_at: new Date().toISOString(),
-      revoked_at: undefined,
-      member_name: user.name,
-      member_email: user.email,
-      member_phone: user.phone || '+1 (555) 000-0000',
+    return {
+      success: true,
+      elderlyProfileId: data?.elderly_profile_id,
+      role: data?.role,
     };
-
-    if (existingIndex >= 0) {
-      members[existingIndex] = memberEntry;
-    } else {
-      members.push(memberEntry);
-    }
-    localStorage.setItem(STORAGE_MEMBERS_KEY, JSON.stringify(members));
-
-    // Update user's active session role to match the assigned role if not already owner
-    if (user.role !== 'elderly' && user.role !== invite.role) {
-      user.role = invite.role;
-      localStorage.setItem(STORAGE_SESSION_KEY, JSON.stringify(user));
-    }
-
-    return { success: true, elderlyProfileId: invite.elderly_profile_id, role: invite.role };
   },
 
   /**
@@ -788,30 +684,21 @@ export const authService = {
       return { success: false, error: 'Unauthorized: Only the elderly profile owner can revoke member access.' };
     }
 
-    if (isSupabaseConfigured && supabase) {
-      const { error } = await supabase.rpc('revoke_profile_member', {
-        p_member_id: memberId,
-      });
-
-      if (error) {
-        return { success: false, error: error.message };
-      }
-      return { success: true };
+    if (!isSupabaseConfigured || !supabase) {
+      return { success: false, error: 'Care Circle requires a configured Supabase connection.' };
     }
 
-    // Local DB update
-    const members: ProfileMember[] = JSON.parse(localStorage.getItem(STORAGE_MEMBERS_KEY) || '[]');
-    const target = members.find(m => m.id === memberId && m.elderly_profile_id === elderlyProfile.id);
-    
-    if (!target) {
-      return { success: false, error: 'Member record not found in this healthcare profile.' };
+    const { data: authData, error: authError } = await supabase.auth.getUser();
+    if (authError) return { success: false, error: authError.message };
+    if (!authData.user || authData.user.id !== currentUserId) {
+      return { success: false, error: 'Unauthorized: Sign in as the profile owner to revoke access.' };
     }
 
-    // Invalidate authorization status
-    target.status = 'revoked';
-    target.revoked_at = new Date().toISOString();
-    localStorage.setItem(STORAGE_MEMBERS_KEY, JSON.stringify(members));
+    const { error } = await supabase.rpc('revoke_profile_member', {
+      p_member_id: memberId,
+    });
 
+    if (error) return { success: false, error: error.message };
     return { success: true };
   },
 };

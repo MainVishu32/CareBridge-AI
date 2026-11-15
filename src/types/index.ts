@@ -29,11 +29,11 @@ export interface ElderlyProfile {
   id: string;
   owner_id: string;
   full_name: string;
-  date_of_birth?: string;
-  passcode_hash?: string;
-  emergency_contact_name: string;
-  emergency_contact_phone: string;
-  emergency_contact_relation: string;
+  date_of_birth?: string | null;
+  passcode_hash?: string | null;
+  emergency_contact_name?: string | null;
+  emergency_contact_phone?: string | null;
+  emergency_contact_relation?: string | null;
   created_at: string;
   updated_at?: string;
 }
@@ -41,8 +41,14 @@ export interface ElderlyProfile {
 export type ProfileMemberRole = 'caretaker' | 'family_member';
 export type MemberStatus = 'active' | 'revoked';
 
+// Aliases for Phase 3.1 naming parity
+export type CareProfile = ElderlyProfile;
+export type CareMember = ProfileMember;
+export type Invitation = ProfileInvitation;
+
 export interface ProfileMember {
   id: string;
+  care_profile_id?: string;
   elderly_profile_id: string;
   user_id: string;
   role: ProfileMemberRole;
@@ -59,6 +65,7 @@ export interface ProfileMember {
 
 export interface ProfileInvitation {
   id: string;
+  care_profile_id?: string;
   elderly_profile_id: string;
   invited_by: string;
   invited_email: string;
@@ -81,6 +88,7 @@ export type MedicationTimeOfDay = 'Morning' | 'Afternoon' | 'Evening' | 'Bedtime
  */
 export interface DbMedication {
   id: string;
+  care_profile_id?: string;
   elderly_profile_id: string;
   name: string;
   dosage: string;
@@ -106,6 +114,7 @@ export interface DbMedication {
 export interface DbMedicationSchedule {
   id: string;
   medication_id: string;
+  care_profile_id?: string;
   elderly_profile_id: string;
   time_of_day: MedicationTimeOfDay;
   schedule_time: string; // e.g. "08:00:00"
@@ -122,6 +131,7 @@ export interface DbMedicationLog {
   id: string;
   medication_id: string;
   schedule_id?: string;
+  care_profile_id?: string;
   elderly_profile_id: string;
   scheduled_for: string; // ISO timestamptz
   status: 'taken' | 'pending' | 'missed';
@@ -136,6 +146,7 @@ export interface DbMedicationLog {
  */
 export interface DbAppointment {
   id: string;
+  care_profile_id?: string;
   elderly_profile_id: string;
   title: string;
   doctor_name: string;
@@ -158,6 +169,7 @@ export interface DbAppointment {
  */
 export interface DbNotification {
   id: string;
+  care_profile_id?: string;
   elderly_profile_id: string;
   recipient_user_id: string;
   title: string;
@@ -175,6 +187,7 @@ export interface DbNotification {
  */
 export interface DbActivityLog {
   id: string;
+  care_profile_id?: string;
   elderly_profile_id: string;
   actor_user_id?: string;
   action_type: 

@@ -12,6 +12,7 @@ import {
 } from '../types';
 import { authService } from '../services/authService';
 import { dbService } from '../services/dbService';
+import { isSupabaseConfigured, supabase } from '../lib/supabaseClient';
 
 interface AuthContextType {
   user: UserProfile | null;
@@ -27,7 +28,7 @@ interface AuthContextType {
   
   // Auth methods
   signIn: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
-  signUp: (params: { email: string; password: string; fullName: string; role: UserRole; phone?: string }) => Promise<{ success: boolean; error?: string }>;
+  signUp: (params: { email: string; password: string; fullName: string; role: UserRole; phone?: string }) => Promise<{ success: boolean; error?: string; needsEmailConfirmation?: boolean }>;
   signInWithPasscode: (passcode: string) => Promise<{ success: boolean; error?: string }>;
   signOut: () => Promise<void>;
 
@@ -41,6 +42,7 @@ interface AuthContextType {
     emergencyContactRelation: string;
   }) => Promise<{ success: boolean; error?: string }>;
   inviteMember: (email: string, role: ProfileMemberRole, permissions?: string[]) => Promise<{ invitation: ProfileInvitation | null; error?: string }>;
+  verifyInvitation: (inviteCode: string, email: string) => Promise<{ role?: ProfileMemberRole; error?: string }>;
   acceptInvitation: (inviteCode: string) => Promise<{ success: boolean; error?: string }>;
   revokeMember: (memberId: string) => Promise<{ success: boolean; error?: string }>;
   refreshProfileData: () => Promise<void>;
@@ -93,7 +95,47 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     loadInitialSession();
   }, []);
 
+  useEffect(() => {
+    const client = supabase;
+    if (!isSupabaseConfigured || !client || !user || !elderlyProfile) return;
+
+    const channel = client
+      .channel(`care-circle-access-${user.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'care_members',
+          filter: `user_id=eq.${user.id}`,
+        },
+        payload => {
+          const membership = payload.new as { care_profile_id?: string; status?: string };
+          if (membership.care_profile_id !== elderlyProfile.id || membership.status !== 'revoked') return;
+
+          setElderlyProfile(null);
+          setMembers([]);
+          setPendingInvitations([]);
+          setMedications([]);
+          setAppointments([]);
+          setNotifications([]);
+          setError('Your access to this care profile has been revoked.');
+        },
+      )
+      .subscribe();
+
+    return () => {
+      void client.removeChannel(channel);
+    };
+  }, [user?.id, elderlyProfile?.id]);
+
   async function loadHealthcareData(currentUser: UserProfile) {
+    setError(null);
+    setMembers([]);
+    setPendingInvitations([]);
+    setMedications([]);
+    setAppointments([]);
+    setNotifications([]);
     try {
       const ep = await authService.getElderlyProfile(currentUser.id, currentUser.role);
       setElderlyProfile(ep);
@@ -137,6 +179,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     } catch (err) {
       console.error('Error loading healthcare profile details from database:', err);
+      setError('Unable to load secure care profile data. Please refresh and try again.');
     }
   }
 
@@ -174,9 +217,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const result = await authService.signUp(params);
     setIsLoading(false);
 
+    if (result.needsEmailConfirmation) {
+      return { success: false, needsEmailConfirmation: true };
+    }
+
     if (result.error || !result.user) {
       setError(result.error || 'Registration failed');
-      return { success: false, error: result.error };
+      return {
+        success: false,
+        error: result.error,
+        needsEmailConfirmation: result.needsEmailConfirmation,
+      };
     }
 
     setUser(result.user);
@@ -268,15 +319,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (!user) return { success: false, error: 'Please sign in first to redeem an invitation code.' };
 
     setIsLoading(true);
-    const result = await authService.acceptInvitation(inviteCode, user);
-    setIsLoading(false);
+    try {
+      const result = await authService.acceptInvitation(inviteCode, user);
+      if (!result.success) return result;
 
-    if (!result.success) {
-      return result;
+      const updatedUser = result.role ? { ...user, role: result.role } : user;
+      setUser(updatedUser);
+      await loadHealthcareData(updatedUser);
+      return { success: true };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to redeem invitation.',
+      };
+    } finally {
+      setIsLoading(false);
     }
-
-    await loadHealthcareData(user);
-    return { success: true };
   };
 
   const revokeMember = async (memberId: string) => {
@@ -395,6 +453,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         signOut,
         createElderlyProfile,
         inviteMember,
+        verifyInvitation: authService.verifyInvitation,
         acceptInvitation,
         revokeMember,
         refreshProfileData,

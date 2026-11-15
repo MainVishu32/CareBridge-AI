@@ -29,7 +29,7 @@ export const AuthView: React.FC<AuthViewProps> = ({
   onSuccess,
   onBackToLanding,
 }) => {
-  const { signIn, signUp, signInWithPasscode, acceptInvitation, error: authError } = useAuth();
+  const { user, signIn, signUp, signInWithPasscode, verifyInvitation, acceptInvitation, error: authError } = useAuth();
 
   const [mode, setMode] = useState<AuthMode>(initialMode);
   const [selectedRole, setSelectedRole] = useState<UserRole>('elderly');
@@ -98,22 +98,12 @@ export const AuthView: React.FC<AuthViewProps> = ({
     setLocalError(null);
     setSuccessMessage(null);
 
-    // Form Validations
-    if (mode === 'login') {
-      if (!email.trim() || !password.trim()) {
-        setLocalError('Please enter both your email address and password.');
-        return;
-      }
-      setIsSubmitting(true);
-      const res = await signIn(email.trim(), password);
-      setIsSubmitting(false);
+    if (mode === 'login' && (!email.trim() || !password.trim())) {
+      setLocalError('Please enter both your email address and password.');
+      return;
+    }
 
-      if (res.success) {
-        onSuccess();
-      } else {
-        setLocalError(res.error || 'Authentication failed. Please check credentials.');
-      }
-    } else if (mode === 'register') {
+    if (mode === 'register') {
       if (!fullName.trim() || !email.trim() || !password.trim()) {
         setLocalError('Please complete all required fields.');
         return;
@@ -122,41 +112,87 @@ export const AuthView: React.FC<AuthViewProps> = ({
         setLocalError('Password must be at least 6 characters long.');
         return;
       }
+    }
 
-      setIsSubmitting(true);
-      const res = await signUp({
-        email: email.trim(),
-        password,
-        fullName: fullName.trim(),
-        role: selectedRole,
-        phone: phone.trim(),
-      });
-      setIsSubmitting(false);
+    if (mode === 'invitation' && !inviteCode.trim()) {
+      setLocalError('Please enter the invitation code.');
+      return;
+    }
 
-      if (res.success) {
-        // If they registered as caretaker or family and entered an invite code, redeem it!
+    setIsSubmitting(true);
+    try {
+      if (mode === 'login') {
+        const result = await signIn(email.trim(), password);
+        if (!result.success) {
+          setLocalError(result.error || 'Authentication failed. Please check credentials.');
+          return;
+        }
+
         if (inviteCode.trim()) {
-          await acceptInvitation(inviteCode.trim());
+          const redemption = await acceptInvitation(inviteCode.trim());
+          if (!redemption.success) {
+            setMode('invitation');
+            setLocalError(redemption.error || 'Failed to redeem the invitation.');
+            return;
+          }
         }
         onSuccess();
-      } else {
-        setLocalError(res.error || 'Registration failed.');
-      }
-    } else if (mode === 'invitation') {
-      if (!inviteCode.trim()) {
-        setLocalError('Please enter the 6-character invitation code.');
-        return;
-      }
-      setIsSubmitting(true);
-      const res = await acceptInvitation(inviteCode.trim());
-      setIsSubmitting(false);
+      } else if (mode === 'register') {
+        let role = selectedRole;
+        if (inviteCode.trim()) {
+          const verification = await verifyInvitation(inviteCode.trim(), email.trim());
+          if (verification.error || !verification.role) {
+            setLocalError(verification.error || 'The invitation could not be verified.');
+            return;
+          }
+          role = verification.role;
+        }
 
-      if (res.success) {
+        const result = await signUp({
+          email: email.trim(),
+          password,
+          fullName: fullName.trim(),
+          role,
+          phone: phone.trim(),
+        });
+
+        if (result.needsEmailConfirmation) {
+          setSuccessMessage('Account created. Confirm your email, then sign in with this email and invitation code to complete redemption.');
+          setMode('login');
+          return;
+        }
+        if (!result.success) {
+          setLocalError(result.error || 'Registration failed.');
+          return;
+        }
+
+        if (inviteCode.trim()) {
+          const redemption = await acceptInvitation(inviteCode.trim());
+          if (!redemption.success) {
+            setLocalError(redemption.error || 'Your account was created, but the invitation could not be redeemed.');
+            return;
+          }
+        }
+        onSuccess();
+      } else if (mode === 'invitation') {
+        if (!user) {
+          setMode('login');
+          setLocalError('Sign in with the invited email address before redeeming this code.');
+          return;
+        }
+
+        const result = await acceptInvitation(inviteCode.trim());
+        if (!result.success) {
+          setLocalError(result.error || 'Failed to accept invitation.');
+          return;
+        }
         setSuccessMessage('Invitation accepted! Redirecting to connected profile...');
         setTimeout(() => onSuccess(), 1000);
-      } else {
-        setLocalError(res.error || 'Failed to accept invitation.');
       }
+    } catch (error) {
+      setLocalError(error instanceof Error ? error.message : 'The request could not be completed. Please try again.');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -403,16 +439,14 @@ export const AuthView: React.FC<AuthViewProps> = ({
                     icon={<Phone className="w-5 h-5" />}
                   />
 
-                  {selectedRole !== 'elderly' && (
-                    <Input
-                      label="Optional: Invitation Code"
-                      placeholder="e.g. CARE-NW89K2"
-                      value={inviteCode}
-                      onChange={(e) => setInviteCode(e.target.value.toUpperCase())}
-                      icon={<Ticket className="w-5 h-5" />}
-                      helperText="If an elderly profile owner gave you a code, enter it here"
-                    />
-                  )}
+                  <Input
+                    label="Optional: Invitation Code"
+                    placeholder="Paste the code from the profile owner"
+                    value={inviteCode}
+                    onChange={(e) => setInviteCode(e.target.value.toUpperCase())}
+                    icon={<Ticket className="w-5 h-5" />}
+                    helperText="The code and your email are checked against the owner’s invitation."
+                  />
                 </>
               )}
 
@@ -498,12 +532,12 @@ export const AuthView: React.FC<AuthViewProps> = ({
           {mode === 'invitation' && (
             <form onSubmit={handleFormSubmit} className="space-y-4">
               <div className="p-4 rounded-xl bg-brand-50 border border-brand-200 text-xs text-brand-900 leading-relaxed">
-                Enter the 6-character code given to you by the elderly profile owner or primary family proxy (e.g. <code>CARE-NW89K2</code>).
+                Enter the secure invitation code. It can only be redeemed using the email address invited by the profile owner.
               </div>
 
               <Input
                 label="Invitation Code"
-                placeholder="e.g. CARE-NW89K2"
+                placeholder="Paste the code from the profile owner"
                 value={inviteCode}
                 onChange={(e) => setInviteCode(e.target.value.toUpperCase())}
                 icon={<Ticket className="w-5 h-5 text-brand-600" />}
